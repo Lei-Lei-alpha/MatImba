@@ -1,0 +1,49 @@
+save:
+  basedir: 'experiments/matfold/log_gvrh'
+  outdir: 'dir'
+  
+data:
+  data_loc: 'matbench_data/matbench_log_gvrh'
+  folds: [0,1,2,3,4]
+  target_name: 'log10(G_VRH)'
+  test_size: 0.1
+  batch_size: 879
+  reweight: 'sqrt_inv'
+  shuffle: true
+  seed: 39
+  cutoff: 5
+  add_z_bond_coord: false
+  atom_features: 'embed'
+  edge_embed_size: 10
+  
+fds:
+  bucket_num: 50
+  start_update: 1
+  start_smooth: 5
+  kernel: 'gaussian' 
+  kernel_size: 2
+  sigma: 3
+  momentum: 0.90
+
+model:
+  state_input_shape: 2
+
+train:
+  epoch_range: 500
+  weighted_loss: true
+  alpha_metric: 'dcor'
+  dil_inform: false
+  
+hpo:
+  trials: 10  # Number of Optuna trials (0 to skip)
+
+multi_runs: 5  # Number of multi-seed runs after HPO
+
+optimiser:
+  name: 'AdamW'
+
+scheduler:
+  name: 'CosineAnnealingLR'
+  
+loss:
+  loss: 'WeightedHuberLoss'

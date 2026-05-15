@@ -1,0 +1,22 @@
+\begin{table}[h]
+\centering
+\begin{tabular}{llcc}
+\toprule
+Dataset & Method & MAE Flatness & SERA Flatness \\
+\midrule
+\texttt{log\_kvrh} & DILA & 180.53 & 0.80 \\
+ & Control & 147.37 & 0.84 \\
+\midrule
+\texttt{log\_gvrh} & DILA & 297.66 & 2.02 \\
+ & Control & 191.65 & 0.71 \\
+\midrule
+\texttt{perovskites} & DILA & 558.64 & 2.59 \\
+ & Control & 643.33 & 2.68 \\
+\midrule
+\texttt{phonons} & DILA & 0.15 & $1.0 \times 10^{-5}$ \\
+ & Control & 0.19 & $1.1 \times 10^{-5}$ \\
+\bottomrule
+\end{tabular}
+\caption{Quantitative analysis of generalisation basin geometric stability across all evaluated materials datasets.}
+\label{tab:combined_flatness}
+\end{table}

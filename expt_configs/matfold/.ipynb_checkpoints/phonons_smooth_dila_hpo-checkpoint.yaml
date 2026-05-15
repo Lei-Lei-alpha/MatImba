@@ -1,0 +1,45 @@
+save:
+  basedir: 'experiments/matfold/phonons'
+  outdir: 'smooth_dila'
+  
+data:
+  data_loc: 'matbench_data/matbench_phonons/matfold'
+  folds: [0,1,2,3,4]
+  target_name: 'last phdos peak'
+  test_size: 0.1
+  batch_size: 256
+  reweight: 'sqrt_inv'
+  shuffle: true
+  seed: 39
+  cutoff: 5
+  add_z_bond_coord: false
+  atom_features: 'embed'
+  edge_embed_size: 10
+
+model:
+  state_input_shape: 2
+  device: cuda:0
+
+train:
+  epoch_range: 500
+  weighted_loss: false
+  alpha_metric: 'dcor'
+  dil_inform: true
+  dil_config:
+    method: 'smooth'
+    lambda: 1.05
+    warmup_epochs: 10
+
+hpo:
+  trials: 16  # Number of Optuna trials (0 to skip)
+
+multi_runs: 5  # Number of multi-seed runs after HPO
+
+optimiser:
+  name: 'AdamW'
+
+scheduler:
+  name: 'CosineAnnealingLR'
+  
+loss:
+  loss: 'WeightedHuberLoss'

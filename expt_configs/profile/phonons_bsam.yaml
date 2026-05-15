@@ -1,0 +1,46 @@
+save:
+  basedir: 'experiments/profile/phonons'
+  outdir: 'bsam'
+  
+data:
+  data_loc: 'matbench_data/matbench_phonons'
+  folds: [0]
+  target_name: 'last phdos peak'
+  test_size: 0.1
+  batch_size: 256
+  reweight: 'sqrt_inv'
+  shuffle: true
+  seed: 39
+  cutoff: 5
+  add_z_bond_coord: false
+  atom_features: 'embed'
+  edge_embed_size: 10
+
+model:
+  state_input_shape: 2
+
+train:
+  epoch_range: 500
+  weighted_loss: true # Required for BSAM
+  alpha_metric: 'dcor'
+  dil_inform: false
+  profile_runtime: true
+
+# --- NEW: BSAM Configuration ---
+bsam:
+  rho: 0.05       # Initial neighborhood size (will be tuned by HPO)
+  adaptive: false # Set to true for ASAM (Adaptive SAM)
+  
+hpo:
+  trials: 10  # Number of Optuna trials (0 to skip)
+
+multi_runs: 5  # Number of multi-seed runs after HPO
+    
+optimiser:
+  name: 'AdamW'
+
+scheduler:
+  name: 'CosineAnnealingLR'  # 'CosineAnnealingLR' for smooth dynamics; alternatives: 'OneCycleLR' or 'ReduceLROnPlateau'
+  
+loss:
+  loss: 'WeightedHuberLoss'

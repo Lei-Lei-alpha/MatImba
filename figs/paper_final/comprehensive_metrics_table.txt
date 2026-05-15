@@ -1,0 +1,32 @@
+\begin{table}[h]
+\centering
+\caption{Comprehensive predictive performance (Mean $\pm$ Standard Deviation) across 5-fold cross-validation. The Tail is defined by a critical relevance threshold of $\phi(y) > 0.8$.}
+\label{tab:comprehensive_metrics}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llcccc}
+\toprule
+\textbf{Dataset} & \textbf{Method} & \textbf{Head MAE} & \textbf{Tail MAE} & \textbf{SERA} & \textbf{Awareness ($\alpha$)} \\
+\midrule
+\texttt{log\_kvrh} & Control & $0.073 \pm 0.003$ & $0.234 \pm 0.014$ & $6.923 \pm 2.696$ & $0.654 \pm 0.064$ \\
+ & DIR & $0.074 \pm 0.003$ & $0.226 \pm 0.027$ & $8.287 \pm 2.574$ & $0.674 \pm 0.067$ \\
+ & BSAM & $0.073 \pm 0.002$ & $0.229 \pm 0.031$ & $8.577 \pm 2.798$ & $0.657 \pm 0.075$ \\
+ & DILA & $0.072 \pm 0.003$ & $0.221 \pm 0.022$ & $8.023 \pm 2.364$ & $0.669 \pm 0.068$ \\
+\midrule
+\texttt{log\_gvrh} & Control & $0.095 \pm 0.001$ & $0.179 \pm 0.014$ & $4.452 \pm 0.987$ & $0.894 \pm 0.039$ \\
+ & DIR & $0.097 \pm 0.002$ & $0.180 \pm 0.014$ & $4.514 \pm 1.723$ & $0.893 \pm 0.050$ \\
+ & BSAM & $0.095 \pm 0.002$ & $0.177 \pm 0.019$ & $4.877 \pm 1.848$ & $0.864 \pm 0.021$ \\
+ & DILA & $0.096 \pm 0.003$ & $0.176 \pm 0.008$ & $4.108 \pm 1.739$ & $0.901 \pm 0.051$ \\
+\midrule
+\texttt{perovskites} & Control & $0.037 \pm 0.000$ & $0.068 \pm 0.006$ & $2.329 \pm 0.962$ & $0.925 \pm 0.032$ \\
+ & DIR & $0.037 \pm 0.001$ & $0.068 \pm 0.007$ & $2.353 \pm 0.905$ & $0.927 \pm 0.035$ \\
+ & BSAM & $0.038 \pm 0.001$ & $0.069 \pm 0.006$ & $2.437 \pm 0.886$ & $0.918 \pm 0.030$ \\
+ & DILA & $0.037 \pm 0.001$ & $0.067 \pm 0.007$ & $2.349 \pm 0.961$ & $0.926 \pm 0.032$ \\
+\midrule
+\texttt{phonons} & Control & $24.133 \pm 1.468$ & $93.718 \pm 11.979$ & $(5.0 \pm 1.8) \times 10^{5}$ & $0.531 \pm 0.115$ \\
+ & DIR & $23.429 \pm 1.111$ & $86.083 \pm 7.073$ & $(4.4 \pm 0.8) \times 10^{5}$ & $0.544 \pm 0.097$ \\
+ & BSAM & $25.661 \pm 1.550$ & $92.315 \pm 6.812$ & $(4.5 \pm 0.8) \times 10^{5}$ & $0.573 \pm 0.069$ \\
+ & DILA & $24.789 \pm 0.622$ & $95.451 \pm 14.191$ & $(5.2 \pm 1.4) \times 10^{5}$ & $0.534 \pm 0.116$ \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
