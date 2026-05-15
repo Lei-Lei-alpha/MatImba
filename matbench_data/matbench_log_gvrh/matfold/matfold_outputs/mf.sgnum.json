@@ -1,0 +1,29 @@
+{
+    "MatFold": "v1.3.3",
+    "data_checksums": [
+        61459370253077752914339183350853019644,
+        140980207794988001326057487125163361694
+    ],
+    "__init__": {
+        "return_frac": 1.0,
+        "always_include_n_elements": null,
+        "cols_to_keep": null,
+        "keep_splitlabel_cols": false,
+        "write_data_checksums": true,
+        "seed": 23
+    },
+    "split_function_called": "create_nested_splits",
+    "split_parameters": {
+        "split_type": "sgnum",
+        "n_inner_splits": 1,
+        "n_outer_splits": 5,
+        "fraction_upper_limit": 1.0,
+        "fraction_lower_limit": 0.0,
+        "keep_n_elements_in_train": [],
+        "min_train_test_factor": null,
+        "inner_equals_outer_split_strategy": true,
+        "write_base_str": "mf",
+        "output_dir": "matbench_data/matbench_log_gvrh/matfold/matfold_outputs",
+        "verbose": false
+    }
+}

@@ -1,0 +1,32 @@
+\begin{table}[h]
+\centering
+\caption{Comprehensive predictive performance (Mean $\pm$ Standard Deviation) across 5-fold cross-validation. The Tail is defined by a critical relevance threshold of $\phi(y) > 0.8$.}
+\label{tab:comprehensive_metrics}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llcccc}
+\toprule
+\textbf{Dataset} & \textbf{Method} & \textbf{Head MAE} & \textbf{Tail MAE} & \textbf{SERA} & \textbf{Awareness ($\alpha$)} \\
+\midrule
+\texttt{log\_kvrh} & Control & $0.085 \pm 0.003$ & $0.263 \pm 0.033$ & $9.639 \pm 6.101$ & $0.627 \pm 0.033$ \\
+ & DIR & $0.085 \pm 0.004$ & $0.255 \pm 0.033$ & $8.794 \pm 4.774$ & $0.645 \pm 0.031$ \\
+ & BSAM & $0.084 \pm 0.003$ & $0.257 \pm 0.028$ & $9.556 \pm 4.711$ & $0.642 \pm 0.028$ \\
+ & DILA & $0.085 \pm 0.003$ & $0.257 \pm 0.034$ & $9.352 \pm 4.605$ & $0.641 \pm 0.037$ \\
+\midrule
+\texttt{log\_gvrh} & Control & $0.118 \pm 0.006$ & $0.206 \pm 0.020$ & $5.618 \pm 3.021$ & $0.887 \pm 0.052$ \\
+ & DIR & $0.118 \pm 0.006$ & $0.207 \pm 0.017$ & $5.035 \pm 1.505$ & $0.888 \pm 0.055$ \\
+ & BSAM & $0.115 \pm 0.005$ & $0.208 \pm 0.020$ & $6.145 \pm 3.338$ & $0.853 \pm 0.063$ \\
+ & DILA & $0.117 \pm 0.006$ & $0.207 \pm 0.022$ & $4.153 \pm 1.586$ & $0.884 \pm 0.042$ \\
+\midrule
+\texttt{perovskites} & Control & $0.091 \pm 0.023$ & $0.122 \pm 0.042$ & $7.401 \pm 8.305$ & $0.861 \pm 0.088$ \\
+ & DIR & $0.092 \pm 0.028$ & $0.122 \pm 0.043$ & $7.332 \pm 8.693$ & $0.866 \pm 0.085$ \\
+ & BSAM & $0.095 \pm 0.025$ & $0.127 \pm 0.039$ & $8.282 \pm 9.322$ & $0.863 \pm 0.078$ \\
+ & DILA & $0.093 \pm 0.024$ & $0.123 \pm 0.046$ & $8.557 \pm 10.807$ & $0.858 \pm 0.080$ \\
+\midrule
+\texttt{phonons} & Control & $28.817 \pm 2.755$ & $136.181 \pm 33.149$ & $(8.0 \pm 1.3) \times 10^{5}$ & $0.464 \pm 0.150$ \\
+ & DIR & $29.273 \pm 2.771$ & $131.265 \pm 42.450$ & $(7.4 \pm 2.6) \times 10^{5}$ & $0.477 \pm 0.136$ \\
+ & BSAM & $31.425 \pm 5.370$ & $142.040 \pm 44.164$ & $(1.0 \pm 0.5) \times 10^{6}$ & $0.472 \pm 0.166$ \\
+ & DILA & $28.401 \pm 1.383$ & $134.290 \pm 39.162$ & $(7.4 \pm 2.4) \times 10^{5}$ & $0.468 \pm 0.166$ \\
+\bottomrule
+\end{tabular}
+}
+\end{table}

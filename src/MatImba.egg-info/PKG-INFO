@@ -1,0 +1,37 @@
+Metadata-Version: 2.4
+Name: MatImba
+Version: 0.0.0
+Summary: A framework for imbalanced regression in materials science.
+Author-email: Lei Lei <Lei.Lei2@nottingham.ac.uk>
+License: MIT
+Project-URL: Homepage, https://github.com/Lei-Lei-alpha/MatImba
+Project-URL: Bug Tracker, https://github.com/Lei-Lei-alpha/MatImba/issues
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: requests>=2.28.1
+Requires-Dist: numpy>=1.22.0
+Requires-Dist: pandas>=2.2.3
+Requires-Dist: joblib>=1.4.2
+Requires-Dist: torch>=2.6.1
+Requires-Dist: more-itertools>=10.5.0
+Requires-Dist: scikit-learn>=1.5.0
+Requires-Dist: scipy>=1.13.1
+Requires-Dist: matplotlib>=3.10.0
+Requires-Dist: ase>=3.25.0
+Requires-Dist: pymatgen>=2025.6.14
+Requires-Dist: matminer==0.9.3
+Requires-Dist: torcheval>=0.0.7
+Requires-Dist: torch_geometric==2.5.3
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: black>=22.3.0; extra == "dev"
+Dynamic: license-file
+
+# Mat_DIR
+Deep imbalanced regression for materials science
+
+Some of the GBR models are larger than 25 MB and can't be uploaded.

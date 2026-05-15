@@ -1,0 +1,17 @@
+2026-01-29 21:52:35,996 - INFO - Logging initialized. Saving log to: matbench_data/matbench_phonons/matfold/preparation.log
+2026-01-29 21:52:35,996 - INFO - --- Starting MatFold Split Preparation ---
+2026-01-29 21:52:35,996 - INFO - Arguments: {'data_dir': 'matbench_data/matbench_phonons', 'out_dir': 'matbench_data/matbench_phonons/matfold', 'split_type': 'spacegroup', 'n_folds': 5, 'seed': 23}
+2026-01-29 21:52:35,997 - INFO - Loading data from matbench_data/matbench_phonons/fold_0...
+2026-01-29 21:52:36,074 - INFO - Combined dataset size: 1265 samples
+2026-01-29 21:52:36,074 - INFO - Generating 'structureid' column...
+2026-01-29 21:52:36,075 - INFO - Extracting structures for MatFold...
+2026-01-29 21:52:36,223 - INFO - Valid structures retained: 1265
+2026-01-29 21:52:36,224 - INFO - Initializing MatFold with split type: spacegroup
+2026-01-29 21:52:39,526 - INFO - Generating splits via MatFold...
+2026-01-29 21:52:39,552 - INFO - Detected MatFold CSV alias: 'sgnum'
+2026-01-29 21:52:39,702 - INFO - Saved Fold 0: Train=1098, Test=167 -> matbench_data/matbench_phonons/matfold/fold_0
+2026-01-29 21:52:39,911 - INFO - Saved Fold 1: Train=1079, Test=186 -> matbench_data/matbench_phonons/matfold/fold_1
+2026-01-29 21:52:40,052 - INFO - Saved Fold 2: Train=849, Test=416 -> matbench_data/matbench_phonons/matfold/fold_2
+2026-01-29 21:52:40,190 - INFO - Saved Fold 3: Train=988, Test=277 -> matbench_data/matbench_phonons/matfold/fold_3
+2026-01-29 21:52:40,326 - INFO - Saved Fold 4: Train=1046, Test=219 -> matbench_data/matbench_phonons/matfold/fold_4
+2026-01-29 21:52:40,326 - INFO - --- SUCCESS: All folds saved to matbench_data/matbench_phonons/matfold ---

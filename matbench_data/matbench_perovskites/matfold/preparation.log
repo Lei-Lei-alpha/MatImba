@@ -1,0 +1,17 @@
+2026-01-29 21:49:53,095 - INFO - Logging initialized. Saving log to: matbench_data/matbench_perovskites/matfold/preparation.log
+2026-01-29 21:49:53,095 - INFO - --- Starting MatFold Split Preparation ---
+2026-01-29 21:49:53,095 - INFO - Arguments: {'data_dir': 'matbench_data/matbench_perovskites', 'out_dir': 'matbench_data/matbench_perovskites/matfold', 'split_type': 'spacegroup', 'n_folds': 5, 'seed': 23}
+2026-01-29 21:49:53,095 - INFO - Loading data from matbench_data/matbench_perovskites/fold_0...
+2026-01-29 21:49:54,105 - INFO - Combined dataset size: 18928 samples
+2026-01-29 21:49:54,106 - INFO - Generating 'structureid' column...
+2026-01-29 21:49:54,110 - INFO - Extracting structures for MatFold...
+2026-01-29 21:49:56,745 - INFO - Valid structures retained: 18928
+2026-01-29 21:49:56,745 - INFO - Initializing MatFold with split type: spacegroup
+2026-01-29 21:50:17,537 - INFO - Generating splits via MatFold...
+2026-01-29 21:50:17,644 - INFO - Detected MatFold CSV alias: 'sgnum'
+2026-01-29 21:50:20,193 - INFO - Saved Fold 0: Train=16693, Test=2235 -> matbench_data/matbench_perovskites/matfold/fold_0
+2026-01-29 21:50:22,407 - INFO - Saved Fold 1: Train=15289, Test=3639 -> matbench_data/matbench_perovskites/matfold/fold_1
+2026-01-29 21:50:24,609 - INFO - Saved Fold 2: Train=13299, Test=5629 -> matbench_data/matbench_perovskites/matfold/fold_2
+2026-01-29 21:50:26,770 - INFO - Saved Fold 3: Train=15813, Test=3115 -> matbench_data/matbench_perovskites/matfold/fold_3
+2026-01-29 21:50:28,927 - INFO - Saved Fold 4: Train=14618, Test=4310 -> matbench_data/matbench_perovskites/matfold/fold_4
+2026-01-29 21:50:28,927 - INFO - --- SUCCESS: All folds saved to matbench_data/matbench_perovskites/matfold ---

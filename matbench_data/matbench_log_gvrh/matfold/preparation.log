@@ -1,0 +1,17 @@
+2026-01-29 21:51:32,825 - INFO - Logging initialized. Saving log to: matbench_data/matbench_log_gvrh/matfold/preparation.log
+2026-01-29 21:51:32,825 - INFO - --- Starting MatFold Split Preparation ---
+2026-01-29 21:51:32,825 - INFO - Arguments: {'data_dir': 'matbench_data/matbench_log_gvrh', 'out_dir': 'matbench_data/matbench_log_gvrh/matfold', 'split_type': 'spacegroup', 'n_folds': 5, 'seed': 23}
+2026-01-29 21:51:32,825 - INFO - Loading data from matbench_data/matbench_log_gvrh/fold_0...
+2026-01-29 21:51:33,860 - INFO - Combined dataset size: 10987 samples
+2026-01-29 21:51:33,860 - INFO - Generating 'structureid' column...
+2026-01-29 21:51:33,863 - INFO - Extracting structures for MatFold...
+2026-01-29 21:51:35,887 - INFO - Valid structures retained: 10987
+2026-01-29 21:51:35,887 - INFO - Initializing MatFold with split type: spacegroup
+2026-01-29 21:52:24,603 - INFO - Generating splits via MatFold...
+2026-01-29 21:52:24,784 - INFO - Detected MatFold CSV alias: 'sgnum'
+2026-01-29 21:52:27,098 - INFO - Saved Fold 0: Train=9004, Test=1983 -> matbench_data/matbench_log_gvrh/matfold/fold_0
+2026-01-29 21:52:29,130 - INFO - Saved Fold 1: Train=9318, Test=1669 -> matbench_data/matbench_log_gvrh/matfold/fold_1
+2026-01-29 21:52:31,168 - INFO - Saved Fold 2: Train=7048, Test=3939 -> matbench_data/matbench_log_gvrh/matfold/fold_2
+2026-01-29 21:52:33,257 - INFO - Saved Fold 3: Train=9927, Test=1060 -> matbench_data/matbench_log_gvrh/matfold/fold_3
+2026-01-29 21:52:35,331 - INFO - Saved Fold 4: Train=8651, Test=2336 -> matbench_data/matbench_log_gvrh/matfold/fold_4
+2026-01-29 21:52:35,331 - INFO - --- SUCCESS: All folds saved to matbench_data/matbench_log_gvrh/matfold ---

@@ -1,0 +1,6 @@
+,n,l,train,test,ntrain,ntest,comment
+1,0,-1,"['P4/mmm', 'P4mm', 'Pm-3m', 'Pmm2']",[np.str_('Pmmm')],16693,2235,split successful
+2,1,-1,"['P4/mmm', 'Pm-3m', 'Pmm2', 'Pmmm']",[np.str_('P4mm')],15289,3639,split successful
+3,2,-1,"['P4mm', 'Pm-3m', 'Pmm2', 'Pmmm']",[np.str_('P4/mmm')],13299,5629,split successful
+4,3,-1,"['P4/mmm', 'P4mm', 'Pmm2', 'Pmmm']",[np.str_('Pm-3m')],15813,3115,split successful
+5,4,-1,"['P4/mmm', 'P4mm', 'Pm-3m', 'Pmmm']",[np.str_('Pmm2')],14618,4310,split successful
