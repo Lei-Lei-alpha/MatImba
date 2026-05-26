@@ -2,7 +2,7 @@
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/get-started/locally/)
-[![License: CC0 1.0](https://shields.io)](https://creativecommons.org)
+[![License: CC0 1.0](https://img.shields.io/badge/License-CC0_1.0-lightgrey.svg)](http://creativecommons.org/publicdomain/zero/1.0/)
 
 Official implementation of **"Unbiasing Materials Discovery: A Distribution Imbalance-Aware Framework for Robust Regression"**.
 
@@ -118,4 +118,4 @@ This work was supported by EPSRC (EP/V042556/1) and the Leverhulme Trust. Comput
 ---
 
 ## 📜 License
-Distributed under the MIT License. See `LICENSE` for more information.
+Distributed under the CC0 1.0 universal License. See `LICENSE` for more information.
