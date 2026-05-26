@@ -35,7 +35,7 @@ MatImba (Materials Imbalance) is a statistically rigorous framework designed to 
 
 2. Install dependencies:
    ```bash
-   pip install -r src/MatImba.egg-info/requires.txt
+   pip install -r requirements.txt
    ```
 
 3. Install the package in editable mode:
