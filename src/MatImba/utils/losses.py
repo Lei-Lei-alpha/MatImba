@@ -366,254 +366,7 @@ class ESRLoss(nn.Module):
 
 # ==============================================================================
 # 4. Correlation / Density Aware Losses (DILA)
-# ==============================================================================
-
-class NaiiveDILALoss(nn.Module):
-    def __init__(self, base_metric='huber', lambda_pcc=0.25, beta=0.99, epsilon=1e-8):
-        """
-        Args:
-            base_metric: 'l1', 'mse', or 'huber'
-            lambda_pcc: Weight of the correlation penalty. 
-                        Higher = stricter independence between error and density.
-            beta: Momentum for the running average of statistics (0.9 to 0.99 recommended).
-                  Helps smooth the noisy trajectory.
-            epsilon: Stability term for division.
-        """
-        super().__init__()
-        self.base_metric = base_metric
-        self.lambda_pcc = lambda_pcc
-        self.beta = beta
-        self.epsilon = epsilon
-        # Register buffers to store running statistics (these are not trainable parameters)
-        # We track Covariance and Variances to approximate global PCC
-        self.register_buffer('running_cov', torch.tensor(0.0))
-        self.register_buffer('running_var_inv_dens', torch.tensor(1.0))
-        self.register_buffer('running_var_mae', torch.tensor(1.0))
-
-    def forward(
-        self, input: torch.Tensor, target: torch.Tensor,
-        density: torch.Tensor, weights: Optional[TensorLike] = None
-    ) -> tuple:
-        """
-        input: (N, C) or (N,)
-        target: (N, C) or (N,)
-        density: (N, C) or (N,) - Local label density
-        """
-        # 1. Calculate Base Task Loss (Per sample)
-        # We keep reduction='none' to allow weighting if needed later, 
-        # but for PCC we need the raw values.
-        input_t, target_t = _sanitize_inputs(input, target)
-        density_t = torch.as_tensor(density, dtype=torch.float32, device=input_t.device)
-        
-        # 1. Base Task Loss (uses shared helper)
-        task_losses = _get_base_loss(input_t, target_t, self.base_metric, weights)
-        # Ensure shapes match
-        if input_t.ndim == 1:
-            input_t = input_t.unsqueeze(1)
-            target_t = target_t.unsqueeze(1)
-            density_t = density_t.unsqueeze(1)
-
-        if density_t.shape != input_t.shape:
-            if density_t.ndim == 1: density_t = density_t.view(-1, 1)
-            if density_t.shape[0] == input_t.shape[0]:
-                 density_t = density_t.expand_as(input_t)
-
-        # 2. 2. Prepare Variables for Correlation
-        # We want to minimize correlation between MAE and (1/Density)
-        # i.e., We don't want Rare items (High 1/Density) to have High MAE.
-        current_maes = torch.abs(input_t - target_t) 
-        inv_densities = 1.0 / torch.clamp(density, min=self.epsilon)
-
-        # 3. Differentiable PCC Calculation (Batch Level)
-        # Center variables
-        mae_centered = current_maes - current_maes.mean(dim=0, keepdim=True)
-        dens_centered = inv_densities - inv_densities.mean(dim=0, keepdim=True)
-        # Calculate batch statistics
-        batch_cov = (mae_centered * dens_centered).mean(dim=0)
-        batch_var_mae = (mae_centered ** 2).mean(dim=0)
-        batch_var_dens = (dens_centered ** 2).mean(dim=0)
-        
-        # 4. Update Running Statistics (EMA)
-        # This stabilizes the gradient. We detach because we don't want to 
-        # backpropagate through the history of the training.
-        if self.training:
-            with torch.no_grad():
-                self.running_cov = self.beta * self.running_cov + (1 - self.beta) * batch_cov.mean()
-
-        # 5. Compute Correlation Penalty
-        # We use the current batch's centered data but normalize using the 
-        # smoothed variances to prevent division by zero or massive jumps 
-        # in gradients when a batch is homogeneous.
-        
-        # Note: We optimize the *batch* correlation directly here to get 
-        # immediate gradients, but we could use the smoothed stats for the denominator.
-        # Here, we stick to batch statistics for the gradient, but you can mix in running stats.
-        
-        denom = torch.sqrt(batch_var_mae * batch_var_dens) + self.epsilon
-        pcc = batch_cov / denom
-        
-        # We want PCC to be 0. So we minimize |PCC| or PCC^2.
-        # PCC^2 is often smoother for optimization (convex parabola).
-        pcc_loss_val = torch.mean(pcc ** 2)
-
-        # 6. Combine Losses
-        # Total = Mean(TaskLoss) + lambda * PCC_Penalty
-        final_loss = task_losses.mean() * (1 + self.lambda_pcc * pcc_loss_val)
-        
-        # --- CRITICAL: RETURN TUPLE ---
-        return final_loss, pcc_loss_val
-
-class StableNaiiveDILALoss(nn.Module):
-    def __init__(self, base_metric='huber', lambda_pcc=0.25, beta=0.95, epsilon=1e-6):
-        """
-        Improvements:
-        - Reduced beta to 0.95 (was 0.99) for faster adaptation of stats.
-        - Uses Global EMA for normalization to prevent "Batch-Overfitting".
-        """
-        super().__init__()
-        self.base_metric = base_metric
-        self.lambda_pcc = lambda_pcc
-        self.beta = beta
-        self.epsilon = epsilon
-        
-        # Buffers for EMA (Global Statistics)
-        self.register_buffer('running_var_mae', torch.tensor(1.0))
-        self.register_buffer('running_var_dens', torch.tensor(1.0))
-
-    def forward(self, input: torch.Tensor, target: torch.Tensor, density: torch.Tensor, weights: Optional[TensorLike] = None) -> tuple:
-        # 1. Base Task Loss
-        input_t, target_t = _sanitize_inputs(input, target)
-        density_t = torch.as_tensor(density, dtype=torch.float32, device=input_t.device)
-        task_losses = _get_base_loss(input_t, target_t, self.base_metric, weights)
-        
-        if input_t.ndim == 1:
-            input_t = input_t.unsqueeze(1)
-            target_t = target_t.unsqueeze(1)
-            density_t = density_t.unsqueeze(1)
-        if density_t.ndim == 1: density_t = density_t.view(-1, 1)
-        if density_t.shape != input_t.shape: density_t = density_t.expand_as(input_t)
-
-        # 2. Prepare Variables
-        current_maes = torch.abs(input_t - target_t) 
-        inv_densities = 1.0 / torch.clamp(density_t, min=self.epsilon)
-        
-        # Center variables (Batch Mean is fine for centering)
-        mae_centered = current_maes - current_maes.mean(dim=0, keepdim=True)
-        dens_centered = inv_densities - inv_densities.mean(dim=0, keepdim=True)
-        
-        # 3. Calculate Batch Variances
-        batch_var_mae = (mae_centered ** 2).mean(dim=0)
-        batch_var_dens = (dens_centered ** 2).mean(dim=0)
-        
-        # 4. Update Global Variances (EMA)
-        # We track the "Global Scale" of the problem here
-        if self.training:
-            with torch.no_grad():
-                self.running_var_mae = self.beta * self.running_var_mae + (1 - self.beta) * batch_var_mae.mean()
-                self.running_var_dens = self.beta * self.running_var_dens + (1 - self.beta) * batch_var_dens.mean()
-
-        # 5. Calculate Robust Correlation Penalty
-        # Numerator: Current Batch Covariance (Gradient flows here)
-        batch_cov = (mae_centered * dens_centered).mean(dim=0)
-        
-        # Denominator: HYBRID Normalization
-        # We mix Batch Variance with Global Variance to stabilize the gradient.
-        # If Batch is too small/noisy, Global takes over.
-        global_std_mae = torch.sqrt(self.running_var_mae)
-        global_std_dens = torch.sqrt(self.running_var_dens)
-        
-        # Use global stats for normalization to align Batch PCC with Global PCC
-        denom = (global_std_mae * global_std_dens) + self.epsilon
-        
-        # We are effectively minimizing Covariance scaled by Global Variance
-        pcc_proxy = batch_cov / denom
-        
-        # Metric: Minimize PCC^2
-        pcc_loss_val = torch.mean(pcc_proxy ** 2) 
-
-        # 6. Combine
-        final_loss = task_losses.mean() * (1 + self.lambda_pcc * pcc_loss_val)
-        
-        return final_loss, pcc_loss_val
-
-class StableDILALoss(nn.Module):
-    """
-    [ROBUST SCALED LOSS] 
-    Optimizes dCov on Z-Scored inputs. 
-    This ensures the penalty magnitude is consistent regardless of density units.
-    """
-    def __init__(self, base_metric='huber', lambda_dcor=1.0, epsilon=1e-8):
-        super().__init__()
-        self.base_metric = base_metric
-        self.lambda_dcor = lambda_dcor
-        self.epsilon = epsilon
-        self.warmup_lambda = None # Placeholder for dynamic lambda update
-
-    def forward(self, input: torch.Tensor, target: torch.Tensor, density: torch.Tensor, weights: Optional[torch.Tensor] = None) -> tuple:
-        input_t, target_t = _sanitize_inputs(input, target)
-        density_t = torch.as_tensor(density, dtype=torch.float32, device=input_t.device)
-        task_losses = _get_base_loss(input_t, target_t, self.base_metric, weights)
-        
-        if input_t.ndim == 1:
-            input_t = input_t.unsqueeze(1)
-            target_t = target_t.unsqueeze(1)
-            density_t = density_t.unsqueeze(1)
-            task_losses = task_losses.unsqueeze(1)
-        if density_t.ndim == 1: density_t = density_t.view(-1, 1)
-        if density_t.shape != input_t.shape: density_t = density_t.expand_as(input_t)
-            
-        # 1. Metric: Log-L1 Error (Monotonic, safe for 0)
-        error_metric = torch.log1p(torch.abs(input_t - target_t))
-        inv_densities = 1.0 / torch.clamp(density_t, min=self.epsilon)
-
-        # 2. Z-SCORE NORMALIZATION (The Fix)
-        # We normalize the batch to Zero Mean, Unit Variance.
-        # This prevents '1/density' scale from blowing up the distance matrix.
-        # We add 1e-5 to std to allow gradients to flow even if std is small.
-        error_norm = (error_metric - error_metric.mean(dim=0, keepdim=True)) / (error_metric.std(dim=0, keepdim=True) + 1e-5)
-        dens_norm = (inv_densities - inv_densities.mean(dim=0, keepdim=True)) / (inv_densities.std(dim=0, keepdim=True) + 1e-5)
-
-        # 3. Distance Matrices on NORMALIZED Data
-        X = dens_norm.T.unsqueeze(-1)
-        Y = error_norm.T.unsqueeze(-1)
-        
-        a = torch.cdist(X, X, p=2)
-        b = torch.cdist(Y, Y, p=2)
-        
-        # 4. Double Centering
-        a_mean_row = a.mean(dim=2, keepdim=True)
-        a_mean_col = a.mean(dim=1, keepdim=True)
-        a_mean_grand = a.mean(dim=(1, 2), keepdim=True)
-        A_centered = a - a_mean_row - a_mean_col + a_mean_grand
-        
-        b_mean_row = b.mean(dim=2, keepdim=True)
-        b_mean_col = b.mean(dim=1, keepdim=True)
-        b_mean_grand = b.mean(dim=(1, 2), keepdim=True)
-        B_centered = b - b_mean_row - b_mean_col + b_mean_grand
-        
-        # 5. Compute dCov (on normalized data, this is roughly dCor)
-        dcov2 = (A_centered * B_centered).mean(dim=(1, 2))
-        dcov2 = torch.clamp(dcov2, min=1e-12)
-        
-        # We optimize the Distance Covariance directly.
-        # Since inputs are normalized, this value is bounded and stable.
-        dcov_loss = torch.sqrt(dcov2).mean()
-        
-        # 6. Final Loss
-        mean_task_loss = task_losses.mean()
-        
-        # Dynamic lambda (handled by trainer, or default self.lambda_dcor)
-        current_lambda = self.warmup_lambda if self.warmup_lambda is not None else self.lambda_dcor
-        
-        # Multiplicative Penalty
-        # Since dcov_loss is now scale-invariant (~0 to 1), lambda=0.25 means 25% penalty.
-        # We detach mean_task_loss to decouple magnitude gradients.
-        penalty_term = mean_task_loss.detach() * current_lambda * dcov_loss
-        
-        final_loss = mean_task_loss + penalty_term
-        
-        return final_loss, dcov_loss
-                
+# ==============================================================================              
 
 class SmoothDILALoss(nn.Module):
     """
@@ -719,21 +472,33 @@ class SmoothDILALoss(nn.Module):
         
         # 6. Compute dCov
         dcov2 = (A_centered * B_centered).mean(dim=(1, 2))
+        dvar_x2 = (A_centered * A_centered).mean(dim=(1, 2))
+        dvar_y2 = (B_centered * B_centered).mean(dim=(1, 2))
+        
         dcov2 = torch.clamp(dcov2, min=1e-12)
         
         dcov_loss = torch.sqrt(dcov2).mean()
         
-        # 7. Final Loss
-        mean_task_loss = task_losses.mean()
+        # 7. Compute Distance Correlation (dCor)
+        # Prevent division by zero with clamp
+        var_product = torch.clamp(dvar_x2 * dvar_y2, min=1e-12)
+        denominator = torch.sqrt(var_product)
         
-        # Check for warmup lambda (set by trainer)
+        # dCor^2 = dCov^2 / sqrt(dVar^2(X) * dVar^2(Y))
+        dcor2 = dcov2 / denominator
+        
+        # Take the final square root to get dCor. Clamped to prevent NaN gradients from negative near-zeros.
+        dcor_loss = torch.sqrt(torch.clamp(dcor2, min=1e-12)).mean()
+        
+        # 8. Final Loss
+        mean_task_loss = task_losses.mean()
         current_lambda = getattr(self, 'warmup_lambda', self.lambda_dcor)
         
-        # Apply Penalty
-        penalty_term = mean_task_loss.detach() * current_lambda * dcov_loss
+        # Strictly adheres to manuscript equation: L = L_task + lambda * dCor
+        penalty_term = current_lambda * dcor_loss
         final_loss = mean_task_loss + penalty_term
         
-        return final_loss, dcov_loss
+        return final_loss, dcor_loss
         
 
 def calc_ser_nd(labels: torch.Tensor, preds: torch.Tensor, relevances: torch.Tensor, t: float) -> torch.Tensor:
