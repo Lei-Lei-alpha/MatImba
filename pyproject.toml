@@ -64,7 +64,10 @@ Source = "https://github.com/Lei-Lei-alpha/MatImba"
 
 # --- Tool Configuration ---
 [tool.hatch.build.targets.wheel]
-packages = ["MatImba/src/MatImba"]
+packages = ["src/MatImba"]
+
+[tool.hatch.build.targets.editable]
+mode = "compat"
 
 [tool.ruff]
 line-length = 100
