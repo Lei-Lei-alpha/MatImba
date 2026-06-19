@@ -389,6 +389,7 @@ class SmoothDILALoss(nn.Module):
         self.register_buffer('running_var_e', torch.tensor(1.0))
         self.register_buffer('running_mean_d', torch.tensor(0.0))
         self.register_buffer('running_var_d', torch.tensor(1.0))
+        self.register_buffer('running_task_loss', torch.tensor(1.0))
         self.is_initialized = False
 
     def _get_base_loss(self, input: torch.Tensor, target: torch.Tensor, weights: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -421,6 +422,7 @@ class SmoothDILALoss(nn.Module):
         # 1. Metric: Log-L1 Error
         error_metric = torch.log1p(torch.abs(input - target))
         inv_densities = 1.0 / torch.clamp(density, min=self.epsilon)
+        mean_task_loss = task_losses.mean()
 
         # 2. Update Running Statistics (Momentum)
         if self.training:
@@ -430,12 +432,13 @@ class SmoothDILALoss(nn.Module):
                 batch_var_e = error_metric.var(unbiased=False)
                 batch_mean_d = inv_densities.mean()
                 batch_var_d = inv_densities.var(unbiased=False)
-                
+
                 if not self.is_initialized:
                     self.running_mean_e = batch_mean_e
                     self.running_var_e = batch_var_e
                     self.running_mean_d = batch_mean_d
                     self.running_var_d = batch_var_d
+                    self.running_task_loss = mean_task_loss
                     self.is_initialized = True
                 else:
                     m = self.momentum
@@ -443,6 +446,7 @@ class SmoothDILALoss(nn.Module):
                     self.running_var_e = (1 - m) * self.running_var_e + m * batch_var_e
                     self.running_mean_d = (1 - m) * self.running_mean_d + m * batch_mean_d
                     self.running_var_d = (1 - m) * self.running_var_d + m * batch_var_d
+                    self.running_task_loss = (1 - m) * self.running_task_loss + m * mean_task_loss
 
         # 3. Normalize using RUNNING stats (Stable Reference)
         # Treated as constants (detach) so we don't backprop through the history
@@ -470,34 +474,31 @@ class SmoothDILALoss(nn.Module):
         b_mean_grand = b.mean(dim=(1, 2), keepdim=True)
         B_centered = b - b_mean_row - b_mean_col + b_mean_grand
         
-        # 6. Compute dCov
+        # 6. Compute dCor² components (Eq. SI2)
+        # dcov2 can be negative — do NOT pre-clamp here; clamping before the
+        # division would create a dead-gradient zone when the model already
+        # achieves error anti-correlation with density (the desired state).
         dcov2 = (A_centered * B_centered).mean(dim=(1, 2))
-        dvar_x2 = (A_centered * A_centered).mean(dim=(1, 2))
-        dvar_y2 = (B_centered * B_centered).mean(dim=(1, 2))
-        
-        dcov2 = torch.clamp(dcov2, min=1e-12)
-        
-        dcov_loss = torch.sqrt(dcov2).mean()
-        
+        dvar_x2 = torch.clamp((A_centered * A_centered).mean(dim=(1, 2)), min=1e-12)
+        dvar_y2 = torch.clamp((B_centered * B_centered).mean(dim=(1, 2)), min=1e-12)
+
         # 7. Compute Distance Correlation (dCor)
-        # Prevent division by zero with clamp
-        var_product = torch.clamp(dvar_x2 * dvar_y2, min=1e-12)
-        denominator = torch.sqrt(var_product)
-        
-        # dCor^2 = dCov^2 / sqrt(dVar^2(X) * dVar^2(Y))
-        dcor2 = dcov2 / denominator
-        
-        # Take the final square root to get dCor. Clamped to prevent NaN gradients from negative near-zeros.
-        dcor_loss = torch.sqrt(torch.clamp(dcor2, min=1e-12)).mean()
-        
-        # 8. Final Loss
-        mean_task_loss = task_losses.mean()
+        # dCor² = dCov² / sqrt(dVar²(E) · dVar²(D))
+        denominator = torch.sqrt(dvar_x2 * dvar_y2)
+        dcor2 = dcov2 / (denominator + 1e-8)
+
+        # Clamp to [0, ∞) only after division: dCor is non-negative by definition.
+        # Gradient flows freely through negative dcov2 (anti-correlation) without
+        # a spurious penalty pulling it back toward zero.
+        dcor_loss = torch.sqrt(torch.clamp(dcor2, min=0.0) + 1e-12).mean()
+
+        # 8. Final Loss  —  L = L_task + EMA(L_task) · λ · dCor
+        # running_task_loss is a gradient-free EMA buffer that keeps the penalty
+        # proportional to the current task-loss scale without any detach() on
+        # the gradient path of mean_task_loss or dcor_loss.
         current_lambda = getattr(self, 'warmup_lambda', self.lambda_dcor)
-        
-        # Strictly adheres to manuscript equation: L = L_task + lambda * dCor
-        penalty_term = current_lambda * dcor_loss
-        final_loss = mean_task_loss + penalty_term
-        
+        final_loss = mean_task_loss + self.running_task_loss * current_lambda * dcor_loss
+
         return final_loss, dcor_loss
         
 

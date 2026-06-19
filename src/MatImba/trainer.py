@@ -25,8 +25,7 @@ from .utils.losses import (
     WeightedL1Loss, WeightedMSELoss,
     WeightedHuberLoss, WeightedFocalMSELoss,
     WeightedFocalL1Loss, ESRLoss,
-    NaiiveDILALoss, SmoothDILALoss,
-    StableDILALoss, calc_alpha, calc_sera,
+    SmoothDILALoss, calc_alpha, calc_sera,
     naiive_calc_alpha
 )
 from .utils.utils import AverageMeter, ProgressMeter, save_checkpoint
@@ -179,6 +178,7 @@ class CgcnnTrainer:
         name: Optional[str] = None,
         log_file: Optional[str] = None,
         profile_runtime: bool = False, # Minimal change: added profiling argument
+        save_checkpoints: bool = True,
     ):
         self.model = model
         # Robust device detection: check model first, fallback to available hardware
@@ -238,6 +238,7 @@ class CgcnnTrainer:
         os.makedirs(self.outdir, exist_ok=True)
         self.name = type(self.model).__name__ if name is None else name
         self.profile_runtime = profile_runtime # Minimal change: stored profiling flag
+        self.save_checkpoints = save_checkpoints
 
         # --- Initialization Steps ---
         self._setup_loss_function(loss_func)
@@ -251,15 +252,14 @@ class CgcnnTrainer:
             method = self.dil_config.get("method", "stable")
             lam = self.dil_config.get("lambda", 1.0)
             
-            if method == "naive":
-                logger.info("Initializing NaiveDILALoss (Batch PCC)...")
-                self.loss_func = NaiveDILALoss(base_metric="huber", lambda_pcc=lam)
-            elif method == "smooth":
-                logger.info("Initializing SmoothDILALoss (Momentum Stats)...")
-                self.loss_func = SmoothDILALoss(base_metric="huber", lambda_dcor=lam, momentum=0.1)
+            mom = self.dil_config.get("momentum", 0.1)
+            base_metric = self.dil_config.get("base_metric", "huber")
+            if method == "smooth":
+                logger.info(f"Initializing SmoothDILALoss (base={base_metric}, λ={lam}, mom={mom})...")
+                self.loss_func = SmoothDILALoss(base_metric=base_metric, lambda_dcor=lam, momentum=mom)
             else:
-                logger.info("Initializing StableDILALoss (dCor + SMAPE)...")
-                self.loss_func = StableDILALoss(base_metric="huber", lambda_dcor=lam)
+                logger.info(f"Initializing SmoothDILALoss (base={base_metric}, λ={lam}, mom={mom})...")
+                self.loss_func = SmoothDILALoss(base_metric=base_metric, lambda_dcor=lam, momentum=mom)
         elif loss_func is None:
             self.loss_func = HuberLoss()
         else:
@@ -336,7 +336,8 @@ class CgcnnTrainer:
                     batch.x, batch.edge_index, batch.edge_attr,
                     batch.state, batch.batch, batch.bond_batch
                 )
-                if outputs.ndim == 1: outputs = outputs.unsqueeze(1)
+                if outputs.ndim == 0: outputs = outputs.unsqueeze(0).unsqueeze(1)
+                elif outputs.ndim == 1: outputs = outputs.unsqueeze(1)
                 if batch.y.ndim == 1: batch.y = batch.y.unsqueeze(1)
 
                 current_weights = None
@@ -348,7 +349,8 @@ class CgcnnTrainer:
                 current_rou = None
                 if self.dil_inform:
                     current_rou = batch.rou
-                    if current_rou.ndim == 1: current_rou = current_rou.unsqueeze(1)
+                    if current_rou.ndim == 0: current_rou = current_rou.unsqueeze(0).unsqueeze(1).expand_as(outputs)
+                    elif current_rou.ndim == 1: current_rou = current_rou.unsqueeze(1)
                     if current_rou.shape[1] != outputs.shape[1]: current_rou = current_rou.expand_as(outputs)
                     
                     loss, penalty = self.loss_func(outputs, batch.y, current_rou, weights=current_weights)
@@ -457,7 +459,8 @@ class CgcnnTrainer:
                 )
 
                 # Dimension check
-                if outputs.ndim == 1: outputs = outputs.unsqueeze(1)
+                if outputs.ndim == 0: outputs = outputs.unsqueeze(0).unsqueeze(1)
+                elif outputs.ndim == 1: outputs = outputs.unsqueeze(1)
                 if batch.y.ndim == 1: batch.y = batch.y.unsqueeze(1)
 
                 # Batch-level metrics
@@ -503,6 +506,9 @@ class CgcnnTrainer:
         mse = self.meter_val_mse.avg
         l1 = self.meter_val_l1.avg
         esr = self.criterion_esr(all_preds, all_labels).item()
+        # SERA integrated from t=0.5 to 1.0 (lower bound captures tail samples
+        # with relevance > 0.5 while excluding near-zero contributions from the
+        # dense head; matches reported values in Tables SI5 and SI6).
         sera_scalar = calc_sera(all_labels, all_preds, all_relevances, t=0.5).mean().item()
         # Calculate Awareness (Dependence between Error and Density)
         # alpha_metric decides if we use Pearson Correlation (pcc) or Distance Correlation (dcor)
@@ -629,7 +635,8 @@ class CgcnnTrainer:
                 # We treat that as a heavy penalty.
                 penalty_sera = max(0.0, self.ema_log_sera - self.min_log_sera)
 
-                # Weights: # w_aware=0.5 to balance the squaring effect (0.2^2 = 0.04 * 0.5 = 0.02 = 2% penalty)
+                # Weights (w_alpha=0.50, w_SERA=0.10; see SI Eq. robust_score):
+                # w_aware=0.5 balances the squaring effect (0.2^2 * 0.5 = 0.02 = 2% penalty)
                 w_aware = 0.5
                 w_sera = 0.10
                 
@@ -667,27 +674,28 @@ class CgcnnTrainer:
                     logger.info(f"New Best Robust Model! (Score: {robust_score:.4f} | MAE: {val_l1:.3f} | Aware: {awareness:.3f})")
 
                 # Save Checkpoint
-                save_checkpoint(
-                    state={
-                        "epoch": epoch,
-                        "best_loss": self.best_l1_loss,
-                        "model": {
-                            "name": type(self.model).__name__,
-                            "states": self.model.state_dict(),
-                            # Add generic param saving if model supports it
-                            "init_params": getattr(self.model, "init_params", {}), 
-                            "fds_params": getattr(self.model, "fds_params", {}),
+                if self.save_checkpoints:
+                    save_checkpoint(
+                        state={
+                            "epoch": epoch,
+                            "best_loss": self.best_l1_loss,
+                            "model": {
+                                "name": type(self.model).__name__,
+                                "states": self.model.state_dict(),
+                                # Add generic param saving if model supports it
+                                "init_params": getattr(self.model, "init_params", {}),
+                                "fds_params": getattr(self.model, "fds_params", {}),
+                            },
+                            "optimiser": self.optimiser.state_dict(),
+                            "scheduler": self.scheduler.state_dict(),
                         },
-                        "optimiser": self.optimiser.state_dict(),
-                        "scheduler": self.scheduler.state_dict(),
-                    },
-                    is_best=is_best,
-                    is_dil_aware_best=is_dil_aware_best,
-                    is_sera_best=is_sera_best,
-                    is_r2_best=is_r2_best,
-                    outdir=self.outdir,
-                    prefix=self.name,
-                )
+                        is_best=is_best,
+                        is_dil_aware_best=is_dil_aware_best,
+                        is_sera_best=is_sera_best,
+                        is_r2_best=is_r2_best,
+                        outdir=self.outdir,
+                        prefix=self.name,
+                    )
 
                 # Append metrics to CSV
                 with open(log_path, "a") as f:
@@ -740,9 +748,10 @@ class CgcnnTrainer:
         add_cols("relevance", test_relevances)
         add_cols("density", test_densities)
 
-        pred_path = os.path.join(self.outdir, f"{self.name}_test_predictions.csv")
-        pd.DataFrame(data_dict).to_csv(pred_path, index=False)
-        logger.info(f"Test predictions saved to {pred_path}")
+        if self.save_checkpoints:
+            pred_path = os.path.join(self.outdir, f"{self.name}_test_predictions.csv")
+            pd.DataFrame(data_dict).to_csv(pred_path, index=False)
+            logger.info(f"Test predictions saved to {pred_path}")
 
         return {
             "test_mse": test_mse,
@@ -781,7 +790,8 @@ class CgcnnTrainer:
                     batch.batch, batch.bond_batch
                 )
 
-                if outputs.ndim == 1: outputs = outputs.unsqueeze(1)
+                if outputs.ndim == 0: outputs = outputs.unsqueeze(0).unsqueeze(1)
+                elif outputs.ndim == 1: outputs = outputs.unsqueeze(1)
                 if batch.y.ndim == 1: batch.y = batch.y.unsqueeze(1)
 
                 # Handle metadata

@@ -1,6 +1,6 @@
 # MatImba: Distribution Imbalance-Aware Materials Discovery
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/get-started/locally/)
 [![License: CC0 1.0](https://img.shields.io/badge/License-CC0_1.0-lightgrey.svg)](http://creativecommons.org/publicdomain/zero/1.0/)
 
@@ -15,7 +15,7 @@ MatImba (Materials Imbalance) is a statistically rigorous framework designed to 
 - **Distribution Imbalance Level ($h$):** A scale-invariant metric (normalised Pietra ratio) to rigorously quantify dataset skewness.
 - **Geometric Topology ($W_1$):** Integration of Wasserstein distance to decouple statistical sparsity from geometric transport cost across property manifolds.
 - **DILA Regularisation:** The **Distribution Imbalance Level Aware (DILA)** loss, which explicitly penalises the statistical dependence (Distance Correlation) between predictive residuals and local data density.
-- **Accuracy-First Robust Selection:** A dynamic checkpoint selection criterion that prioritises global accuracy while enforcing structural awareness and tail-error stability.
+- **Accuracy-First Robust Selection:** A dynamic checkpoint selection criterion that prioritises global accuracy while enforcing distribution awareness and tail-error stability.
 - **Global Parity:** Systematically suppresses extreme error spikes in sparse regions (improving SERA) without degrading the Mean Absolute Error (MAE) of the well-represented bulk.
 
 ---
@@ -23,7 +23,7 @@ MatImba (Materials Imbalance) is a statistically rigorous framework designed to 
 ## 🛠️ Installation
 
 ### Prerequisites
-- Python 3.9 or higher
+- Python 3.10 or higher
 - CUDA-enabled GPU (recommended for training)
 
 ### Setup
@@ -33,12 +33,7 @@ MatImba (Materials Imbalance) is a statistically rigorous framework designed to 
    cd matimba
    ```
 
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Install the package in editable mode:
+2. Install the package and all dependencies in editable mode:
    ```bash
    pip install -e .
    ```

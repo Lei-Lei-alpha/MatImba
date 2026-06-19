@@ -1,0 +1,80 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "MatImba"
+version = "0.1.0"
+description = "A framework for imbalanced regression in materials science."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "CC0-1.0" }
+authors = [
+    { name = "Lei Lei", email = "Lei.Lei2@nottingham.ac.uk" },
+    { name = "Sanliang Ling", email = "sanling.ling@nottingham.ac.uk" },
+    { name = "Matthew Witman", email = "mwitman@sandia.gov" },
+]
+
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Physics",
+  "License :: CC0 1.0 Universal (CC0 1.0) Public Domain Dedication",
+  "Operating System :: OS Independent",
+]
+
+dependencies = [
+	"requests>=2.28.1",
+	"numpy>=1.22.0",
+	"pandas>=2.2.3",
+	"joblib>=1.4.2",
+	"torch>=2.6.1",
+	"more-itertools>=10.5.0",
+	"scikit-learn>=1.5.0",
+	"scipy>=1.13.1",
+	"matplotlib>=3.10.0",
+	"ase>=3.25.0",
+	"pymatgen>=2025.6.14",
+	"matminer==0.9.3",
+    "torcheval>=0.0.7",
+    "torchmetrics>=1.8.2",
+	"torch_geometric>=2.5.3",
+    "optuna>=4.6.0",
+    "mendeleev>=1.1.0",
+    "statsmodels>=0.14.5",
+]
+
+[project.scripts]
+matimba-train = "MatImba.run_trainer:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0.0",
+  "pytest-cov",
+  "ruff>=0.3.0", # Replaces Black/Flake8/Isort
+]
+
+[project.urls]
+Homepage = "https://github.com/Lei-Lei-alpha/MatImba"
+Issues = "https://github.com/Lei-Lei-alpha/MatImba/issues"
+Source = "https://github.com/Lei-Lei-alpha/MatImba"
+
+# --- Tool Configuration ---
+[tool.hatch.build.targets.wheel]
+packages = ["MatImba/src/MatImba"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra -q"

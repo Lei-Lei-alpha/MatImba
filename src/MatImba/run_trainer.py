@@ -105,10 +105,33 @@ class RobustObjective:
         # 1. Check for BSAM Config
         bsam_rho = None
         if 'bsam' in self.expt_config:
-            # Tune rho if 'bsam' is in config
             bsam_rho = trial.suggest_float('rho', 0.01, 0.25, log=True)
-            
-        # 1. Suggest Parameters
+
+        # 2. Check for DILA Config — tune base_metric, lambda, momentum
+        # Only active when hpo.tune_dila: true is set in the config (default false).
+        dil_config_overrides = None
+        _tune_dila = self.expt_config.get('hpo', {}).get('tune_dila', False)
+        if self.expt_config['train'].get('dil_inform', False) and _tune_dila:
+            dil_cfg = self.expt_config['train'].get('dil_config', {})
+            if self.first_best_params and 'dila_base_metric' in self.first_best_params:
+                p = self.first_best_params
+                dil_base_metric = trial.suggest_categorical('dila_base_metric', [p['dila_base_metric']])
+                dil_lambda = trial.suggest_float('dila_lambda', *narrow_range(0.5, 3.0, p['dila_lambda']))
+                dil_momentum = trial.suggest_float('dila_momentum', *narrow_range(0.01, 0.5, p['dila_momentum']), log=True)
+            else:
+                dil_base_metric = trial.suggest_categorical('dila_base_metric', ['l1', 'mse', 'huber'])
+                dil_lambda = trial.suggest_float('dila_lambda', 0.5, 3.0)
+                dil_momentum = trial.suggest_float('dila_momentum', 0.01, 0.5, log=True)
+            dil_config_overrides = {
+                'method': dil_cfg.get('method', 'smooth'),
+                'base_metric': dil_base_metric,
+                'lambda': dil_lambda,
+                'momentum': dil_momentum,
+                'warmup_epochs': dil_cfg.get('warmup_epochs', 20),
+            }
+            trial.set_user_attr("dil_config_overrides", dil_config_overrides)
+
+        # 3. Suggest optimiser / scheduler parameters
         config_scheduler = self.expt_config['scheduler'].get('name')
 
         
@@ -180,8 +203,7 @@ class RobustObjective:
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
-                    # Pass bsam_rho to single seed runner
-                    val_mae = self._run_single_seed(trial, seed, optim_params, sched_params, scheduler_type, bsam_rho)
+                    val_mae = self._run_single_seed(trial, seed, optim_params, sched_params, scheduler_type, bsam_rho, dil_config_overrides)
                 results.append(val_mae)
                 
                 # Fail Fast: If first seed is > 1.3x worse than best observed, kill it.
@@ -211,19 +233,20 @@ class RobustObjective:
         g = torch.Generator()
         g.manual_seed(seed)
         data_set_creator = CgcnnDataset(
-            datafile=self.datafiles, target_name=self.target_name, 
-            bond_converter=self.bond_converter, atom_converter=self.atom_converter, 
-            random_seed=seed
+            datafile=self.datafiles, target_name=self.target_name,
+            bond_converter=self.bond_converter, atom_converter=self.atom_converter,
+            random_seed=seed,
+            batch_size=self.expt_config['data']['batch_size'],
         )
         return data_set_creator.prepare_data(
             reweight=self.expt_config['data'].get('reweight', 'log_inv'), 
             generator=g, worker_init_fn=seed_worker
         )
 
-    def _run_single_seed(self, trial, seed, optim_params, sched_params, scheduler_type, bsam_rho=None):
+    def _run_single_seed(self, trial, seed, optim_params, sched_params, scheduler_type, bsam_rho=None, dil_config_overrides=None):
         seed_everything(seed)
         train_loader, val_loader, test_loader = self._get_loader(seed)
-        
+
         model_kwargs = {
             "edge_input_shape": self.bond_converter.get_shape(),
             "node_input_shape": self.atom_converter.get_shape(),
@@ -232,35 +255,33 @@ class RobustObjective:
         }
         if 'fds' in self.expt_config:
             model_kwargs.update({'fds': True, **self.expt_config['fds']})
-        
+
         model = MEGNet(**model_kwargs)
-        
+
         loss_func = get_obj(self.expt_config['loss']['loss'])()
-        
+
         # --- Optimizer Setup with BSAM Support ---
         if bsam_rho is not None:
-             # Wrap AdamW
              optimiser = BSAM(model.parameters(), base_optimizer=torch.optim.AdamW, rho=bsam_rho, **optim_params)
-             # Scheduler uses the inner optimizer
              scheduler = get_obj(scheduler_type)(optimiser.base_optimizer, **sched_params)
         else:
              optimiser = get_obj(self.expt_config['optimiser']['name'])(model.parameters(), **optim_params)
              scheduler = get_obj(scheduler_type)(optimiser, **sched_params)
-        
+
         hpo_dir = os.path.join(self.expt_config['save']['basedir'], self.expt_config['save']['outdir'], 'hpo_trials')
         os.makedirs(hpo_dir, exist_ok=True)
 
         trial_name = f"{self.model_name}_t{getattr(trial, 'number', 'ver')}_s{seed}"
-        setup_file_logging(os.path.join(hpo_dir, f"{trial_name}.log"))
-        
-        # Enforce Weighted Loss for BSAM
+
         train_config = self.expt_config['train'].copy()
         if bsam_rho is not None: train_config['weighted_loss'] = True
+        if dil_config_overrides is not None: train_config['dil_config'] = dil_config_overrides
 
         trainer = CgcnnTrainer(
             model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader,
             loss_func=loss_func, optimiser=optimiser, scheduler=scheduler, scheduler_type=scheduler_type,
-            name=trial_name, **train_config, outdir=hpo_dir
+            name=trial_name, **train_config, outdir=hpo_dir,
+            save_checkpoints=False,  # skip .pth.tar and predictions CSV during HPO
         )
         if hasattr(model, 'FDS'): model.FDS.device = trainer.device
         
@@ -284,11 +305,13 @@ def get_opt_params(study):
 
 def _load_fold0_params(outdir):
     try:
-        # We try to load the JSON first as it's the verified robust one
         json_path = os.path.join(outdir, 'fold_0_best_params.json')
         if os.path.exists(json_path):
             with open(json_path, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+            # Return the flat hpo_params sub-dict (structured format).
+            # Fall back to the top-level dict for legacy flat-format JSONs.
+            return data.get('hpo_params', data)
         # Fallback to DB if JSON missing (legacy)
         return get_opt_params(optuna.load_study(study_name='fold_0', storage=f"sqlite:///{outdir}/optuna_study_fold_0.db"))[0]
     except:
@@ -320,10 +343,11 @@ def verify_top_candidates(study, objective_fn, top_k=3, n_seeds=5):
         
         candidates.append({
             'id': trial_number,
-            'hpo_params': trial.params,  # <--- Ensured Key
-            'optim_params': trial.user_attrs['optim_params'], 
-            'sched_params': trial.user_attrs['sched_params'], 
+            'hpo_params': trial.params,
+            'optim_params': trial.user_attrs['optim_params'],
+            'sched_params': trial.user_attrs['sched_params'],
             'scheduler_type': trial.user_attrs['scheduler_type'],
+            'dil_config_overrides': trial.user_attrs.get('dil_config_overrides'),
             'original_score': row['value']
         })
 
@@ -349,7 +373,8 @@ def verify_top_candidates(study, objective_fn, top_k=3, n_seeds=5):
                     number = f"verify_{cand['id']}"
                 
                 mae = objective_fn._run_single_seed(
-                    DummyTrial(), seed, cand['optim_params'], cand['sched_params'], cand['scheduler_type']
+                    DummyTrial(), seed, cand['optim_params'], cand['sched_params'], cand['scheduler_type'],
+                    dil_config_overrides=cand.get('dil_config_overrides')
                 )
                 results.append(mae)
                 
@@ -371,7 +396,8 @@ def verify_top_candidates(study, objective_fn, top_k=3, n_seeds=5):
                 'scheduler_type': cand['scheduler_type'],
                 'optim_params': cand['optim_params'],
                 'sched_params': cand['sched_params'],
-                'hpo_params': cand['hpo_params']
+                'hpo_params': cand['hpo_params'],
+                'dil_config_overrides': cand.get('dil_config_overrides'),
             }
             
     if best_candidate is None:
@@ -382,15 +408,20 @@ def verify_top_candidates(study, objective_fn, top_k=3, n_seeds=5):
             'scheduler_type': trial.user_attrs['scheduler_type'],
             'optim_params': trial.user_attrs['optim_params'],
             'sched_params': trial.user_attrs['sched_params'],
-            'hpo_params': trial.params
+            'hpo_params': trial.params,
+            'dil_config_overrides': trial.user_attrs.get('dil_config_overrides'),
         }
         
     logger.info(f"Winner: Candidate with score {best_robust_score:.2f}")
     return best_candidate
 
-def run(config_path, config_file):
+def run(config_path, config_file, force_hpo=False):
     with open(os.path.join(config_path, config_file)) as config:
         expt_config = yaml.full_load(config)
+
+    # hpo.force_hpo in the YAML is equivalent to passing --force-hpo on the CLI.
+    # The CLI flag takes precedence; either source activates the behaviour.
+    force_hpo = force_hpo or expt_config.get('hpo', {}).get('force_hpo', False)
 
     # Check for BSAM in config
     use_bsam = 'bsam' in expt_config
@@ -431,49 +462,60 @@ def run(config_path, config_file):
         storage_name = "sqlite:///" + db_file
         best_params_for_runs = None
         best_params_file = os.path.join(outdir, f'fold_{fold}_best_params.json')
-        
+
         # --- HPO Phase ---
-        if hpo_trials > 0:
+        # Fast path: verified params already on disk — skip study creation, trial loop, and verification.
+        # Bypassed when --force-hpo is set, which re-runs HPO even if a JSON exists.
+        if os.path.exists(best_params_file) and not force_hpo:
+            logger.info(f"HPO skipped for fold {fold}: loading verified params from {best_params_file}")
+            with open(best_params_file, 'r') as f:
+                best_params_for_runs = json.load(f)
+        elif hpo_trials > 0:
             study = optuna.create_study(direction='minimize', storage=storage_name, study_name=f'fold_{fold}', load_if_exists=True)
             first_best_params, first_best_value = get_opt_params(study)
-            
-            if fold != 0 and not first_best_params:
+
+            # --force-hpo: seed from existing verified JSON so the new study
+            # narrows around the known-good params instead of searching from scratch.
+            # Guard: only when no completed trial exists yet (avoids overwriting a
+            # partially-finished force-hpo re-run that already has a better trial).
+            if force_hpo and os.path.exists(best_params_file) and not first_best_params:
+                with open(best_params_file, 'r') as f:
+                    existing = json.load(f)
+                first_best_params = existing.get('hpo_params', existing)
+                study.enqueue_trial(first_best_params)
+                logger.info(f"--force-hpo: seeding study from {best_params_file}, narrowing search ranges")
+            elif fold != 0 and not first_best_params:
                 fold_0_params = _load_fold0_params(outdir)
                 if fold_0_params: study.enqueue_trial(fold_0_params)
-            
+
             # Count only COMPLETE trials to ensure sufficient sampling
             completed_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
             target_trials = (hpo_trials if fold == 0 else (1 + 2 * hpo_trials // 3))
             remaining = target_trials - len(completed_trials)
-            
-            # Helper to create objective (needed for both optimization and verification)
+
+            # Single consolidated log for the entire HPO phase — avoids one file per trial-seed.
+            setup_file_logging(os.path.join(outdir, f'fold_{fold}_hpo.log'))
+
             objective_fn = RobustObjective(
-                expt_config, fold, model_name, datafiles, 
+                expt_config, fold, model_name, datafiles,
                 bond_converter, atom_converter, target_name, first_best_params
             )
 
             if remaining > 0:
-                logger.info(f"Running {remaining} Robust HPO trials for fold {fold} (3 seeds/trial)...")
+                logger.info(f"Running {remaining} HPO trials for fold {fold} ({objective_fn.seeds_per_trial} seeds/trial)...")
                 study.optimize(objective_fn, n_trials=remaining)
-            
-            # --- STAGE 2: VERIFICATION ---
-            # Instead of just taking the best result from the limited 3-seed runs,
-            # we verify the top 5 candidates on 5 NEW seeds.
-            # SKIP if we already have the verified params file
-            if os.path.exists(best_params_file):
-                logger.info(f"Verified params found in {best_params_file}. Skipping Stage 2 Verification.")
-                with open(best_params_file, 'r') as f:
-                    best_params_for_runs = json.load(f)
             else:
-                best_params_for_runs = verify_top_candidates(study, objective_fn, top_k=5, n_seeds=5)
-                # Save the params even if HPO was skipped but verification wasn't
-                study.trials_dataframe().to_csv(os.path.join(outdir, f'fold_{fold}_all_trials.csv'), index=False)
-                if best_params_for_runs:
-                    with open(best_params_file, 'w') as f: json.dump(best_params_for_runs, f, indent=4)
-        else:
-             if os.path.exists(db_file):
-                study = optuna.load_study(study_name=f'fold_{fold}', storage=storage_name)
-                best_params_for_runs, _ = get_opt_params(study)
+                logger.info(f"Fold {fold}: {len(completed_trials)}/{target_trials} trials already complete, skipping optimization.")
+
+            # --- STAGE 2: VERIFICATION ---
+            best_params_for_runs = verify_top_candidates(study, objective_fn, top_k=3, n_seeds=5)
+            study.trials_dataframe().to_csv(os.path.join(outdir, f'fold_{fold}_all_trials.csv'), index=False)
+            if best_params_for_runs:
+                with open(best_params_file, 'w') as f:
+                    json.dump(best_params_for_runs, f, indent=4)
+        elif os.path.exists(db_file):
+            study = optuna.load_study(study_name=f'fold_{fold}', storage=storage_name)
+            best_params_for_runs, _ = get_opt_params(study)
 
         # --- Multi-Run Phase ---
         results_file = os.path.join(outdir, f'fold_{fold}_results.csv')
@@ -499,7 +541,8 @@ def run(config_path, config_file):
                 datafile=datafiles, target_name=target_name,
                 bond_converter=bond_converter,
                 atom_converter=atom_converter,
-                random_seed=seed
+                random_seed=seed,
+                batch_size=expt_config['data']['batch_size'],
             )
             train_loader, val_loader, test_loader = data_set_creator.prepare_data(
                 reweight=expt_config['data'].get('reweight', 'log_inv'),
@@ -593,15 +636,19 @@ def run(config_path, config_file):
                 scheduler = get_obj(sched_type)(optimiser, **sched_params)
             
             run_name = f'{model_name}_run{run_id}'
-            
+
             train_config = expt_config['train'].copy()
             if rho is not None: train_config['weighted_loss'] = True
-            
-            run_name = f'{model_name}_run{run_id}'
+            if best_params_for_runs and train_config.get('dil_inform', False):
+                dil_overrides = best_params_for_runs.get('dil_config_overrides')
+                if dil_overrides:
+                    train_config['dil_config'] = dil_overrides
+                    logger.info(f"Run {run_id}: applying tuned DILA config: {dil_overrides}")
+
             trainer = CgcnnTrainer(
                 model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader,
                 loss_func=loss_func, optimiser=optimiser, scheduler=scheduler, scheduler_type=sched_type,
-                name=run_name, **expt_config['train'], outdir=outdir
+                name=run_name, **train_config, outdir=outdir
             )
             if hasattr(model, 'FDS'): model.FDS.device = trainer.device
             
@@ -626,8 +673,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--cd', type=str, default='expt_configs', help='Experiment configuration directory')
     parser.add_argument('--cf', type=str, default='log_kvrh.yaml', help='Experiment configuration file')
+    parser.add_argument('--force-hpo', action='store_true',
+                        help='Re-run HPO even if fold_N_best_params.json already exists on disk')
     args = parser.parse_args()
-    run(args.cd, args.cf)
+    run(args.cd, args.cf, force_hpo=args.force_hpo)
 
 if __name__ == '__main__':
     main()
