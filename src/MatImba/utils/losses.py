@@ -14,15 +14,15 @@ def _sanitize_inputs(input: TensorLike, target: TensorLike) -> Tuple[torch.Tenso
     """Helper to convert inputs to float32 tensors and ensure shapes match."""
     input_t = torch.as_tensor(input, dtype=torch.float32)
     target_t = torch.as_tensor(target, dtype=torch.float32)
-    
+
     if input_t.ndim == 1:
         input_t = input_t.view(-1, 1)
     if target_t.ndim == 1:
         target_t = target_t.view(-1, 1)
-        
+
     if input_t.shape != target_t.shape:
         raise ValueError(f"Shape mismatch: input {input_t.shape} vs target {target_t.shape}")
-    
+
     return input_t, target_t
 
 def _apply_reduction(loss: torch.Tensor, reduction: str) -> torch.Tensor:
@@ -56,17 +56,17 @@ def _get_base_loss(input: torch.Tensor, target: torch.Tensor, metric: str, weigh
     if weights is not None:
         # Convert to tensor, ensure float, move to correct device
         w_t = torch.as_tensor(weights, dtype=loss.dtype, device=loss.device)
-        
+
         # Handle Dimension Mismatch for Broadcasting
         # Case: Loss is (N, 1) but Weights are (N,) -> Unsqueeze Weights to (N, 1)
         if w_t.ndim == 1 and loss.ndim > 1:
             w_t = w_t.view(-1, 1)
-            
+
         # Case: Loss is (N, C) and Weights are (N, 1) -> Broadcast automatically works
         # Case: Loss is (N, C) and Weights are (N, C) -> Element-wise works
-        
+
         loss = loss * w_t
-        
+
     return loss
 
 
@@ -103,15 +103,15 @@ class WeightedHuberLoss(_Loss):
 
     def forward(self, input: TensorLike, target: TensorLike, weights: Optional[TensorLike] = None) -> torch.Tensor:
         input_t, target_t = _sanitize_inputs(input, target)
-        
-        # F.huber_loss does not accept weights directly in all versions, 
+
+        # F.huber_loss does not accept weights directly in all versions,
         # so we compute with reduction='none' first.
         loss = F.huber_loss(input_t, target_t, reduction='none', delta=self.delta)
-        
+
         if weights is not None:
             w_t = torch.as_tensor(weights, dtype=loss.dtype, device=loss.device)
             loss = loss * w_t
-            
+
         return _apply_reduction(loss, self.reduction)
 
 # ==============================================================================
@@ -133,21 +133,21 @@ class WeightedFocalL1Loss(_Loss):
 
     def forward(self, input: TensorLike, target: TensorLike, weights: Optional[TensorLike] = None) -> torch.Tensor:
         input_t, target_t = _sanitize_inputs(input, target)
-        
+
         # Base L1
         l1_loss = torch.abs(input_t - target_t)
-        
+
         if self.activate == 'tanh':
             modulation = (torch.tanh(self.beta * l1_loss)) ** self.gamma
         else:
             modulation = (2 * torch.sigmoid(self.beta * l1_loss) - 1) ** self.gamma
-            
+
         loss = l1_loss * modulation
-        
+
         if weights is not None:
             w_t = torch.as_tensor(weights, dtype=loss.dtype, device=loss.device)
             loss = loss * w_t
-            
+
         return _apply_reduction(loss, self.reduction)
 
 class WeightedFocalMSELoss(_Loss):
@@ -162,27 +162,27 @@ class WeightedFocalMSELoss(_Loss):
         self.activate = activate
         self.beta = beta
         self.gamma = gamma
-        
+
     def forward(self, input: TensorLike, target: TensorLike, weights: Optional[TensorLike] = None) -> torch.Tensor:
         input_t, target_t = _sanitize_inputs(input, target)
-        
+
         # Base MSE
         mse_loss = (input_t - target_t) ** 2
-        
+
         # Modulation factor based on absolute error
         abs_error = torch.abs(input_t - target_t)
-        
+
         if self.activate == 'tanh':
             modulation = (torch.tanh(self.beta * abs_error)) ** self.gamma
         else:
             modulation = (2 * torch.sigmoid(self.beta * abs_error) - 1) ** self.gamma
-            
+
         loss = mse_loss * modulation
-        
+
         if weights is not None:
             w_t = torch.as_tensor(weights, dtype=loss.dtype, device=loss.device)
             loss = loss * w_t
-            
+
         return _apply_reduction(loss, self.reduction)
 
 class WeightedFocalL1Loss(_Loss):
@@ -210,7 +210,7 @@ class WeightedFocalL1Loss(_Loss):
 # ==============================================================================
 # 3. Statistical Losses (ISR / ESR)
 # ==============================================================================
-            
+
 def ISR(x: TensorLike, y: TensorLike) -> torch.Tensor:
     """
     Calculates Internally Studentized Residuals (ISR) for multi-channel data.
@@ -259,7 +259,7 @@ def ISR(x: TensorLike, y: TensorLike) -> torch.Tensor:
     # We keepdim=True to ensure easy broadcasting later
     S_xx = torch.sum(diff_x**2, dim=0, keepdim=True)
     S_xy = torch.sum(diff_x * diff_y, dim=0, keepdim=True)
-    
+
     # Coefficients -> Shape: (1, C)
     beta1 = S_xy / (S_xx + EPS)
     beta0 = mean_y - (beta1 * mean_x)
@@ -281,7 +281,7 @@ def ISR(x: TensorLike, y: TensorLike) -> torch.Tensor:
     # 7. Studentization -> Shape: (N, C)
     # SE_regression varies by observation i due to leverage h_ii
     se_regression_i = std_error * torch.sqrt(1 - h_ii)
-    
+
     # Avoid division by zero
     studentized_residuals = residuals / (se_regression_i + EPS)
 
@@ -290,18 +290,18 @@ def ISR(x: TensorLike, y: TensorLike) -> torch.Tensor:
 
 class ESRLoss(nn.Module):
     """
-    Calculates the Externally Studentized Residual (ESR) Loss, also known as 
-    Studentized Deleted Residuals. This loss is more sensitive to outliers 
+    Calculates the Externally Studentized Residual (ESR) Loss, also known as
+    Studentized Deleted Residuals. This loss is more sensitive to outliers
     than standard MSE or ISR.
-    
-    Formula: 
+
+    Formula:
         t_i = r_i * sqrt( (n - p - 1) / (n - p - r_i^2) )
         where r_i is the ISR, n is sample size, p is number of parameters (2).
     """
     def __init__(self, reduction: str = 'mean', epsilon: float = 1e-6) -> None:
         """
         Args:
-            reduction (str): Specifies the reduction to apply to the output: 
+            reduction (str): Specifies the reduction to apply to the output:
                              'none' | 'mean' | 'sum'. Default: 'mean'.
             epsilon (float): Small value to prevent division by zero or sqrt of negative numbers.
         """
@@ -310,9 +310,9 @@ class ESRLoss(nn.Module):
         self.epsilon = epsilon
 
     def forward(
-        self, 
-        input: TensorLike, 
-        target: TensorLike, 
+        self,
+        input: TensorLike,
+        target: TensorLike,
         weights: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """
@@ -327,7 +327,7 @@ class ESRLoss(nn.Module):
         # 1. Compute Internally Studentized Residuals (ISR)
         # We assume compute_isr_multichannel is defined as in the previous step
         isr = ISR(input, target)
-        
+
         # 2. Get dimensions
         # n = number of observations (rows)
         n = isr.size(0)
@@ -366,13 +366,13 @@ class ESRLoss(nn.Module):
 
 # ==============================================================================
 # 4. Correlation / Density Aware Losses (DILA)
-# ==============================================================================              
+# ==============================================================================
 
 class SmoothDILALoss(nn.Module):
     """
-    [SMOOTH STABLE LOSS] 
+    [SMOOTH STABLE LOSS]
     Uses Momentum (EMA) for normalization statistics to fix oscillation.
-    
+
     Why this helps:
     - Standard StableDILALoss normalizes using *Batch Stats*, which jitter.
     - SmoothDILALoss normalizes using *Running Stats*, which are stable.
@@ -383,7 +383,7 @@ class SmoothDILALoss(nn.Module):
         self.lambda_dcor = lambda_dcor
         self.momentum = momentum
         self.epsilon = epsilon
-        
+
         # Buffers to track global statistics (Initialized lazily on first forward)
         self.register_buffer('running_mean_e', torch.tensor(0.0))
         self.register_buffer('running_var_e', torch.tensor(1.0))
@@ -412,13 +412,13 @@ class SmoothDILALoss(nn.Module):
     def forward(self, input: torch.Tensor, target: torch.Tensor, density: torch.Tensor, weights: Optional[TensorLike] = None) -> tuple:
         input_t, target_t = _sanitize_inputs(input, target)
         task_losses = self._get_base_loss(input_t, target_t, weights)
-        
+
         if input.ndim == 1:
             input = input.unsqueeze(1)
             target = target.unsqueeze(1)
             density = density.unsqueeze(1)
             task_losses = task_losses.unsqueeze(1)
-            
+
         # 1. Metric: Log-L1 Error
         error_metric = torch.log1p(torch.abs(input - target))
         inv_densities = 1.0 / torch.clamp(density, min=self.epsilon)
@@ -452,32 +452,29 @@ class SmoothDILALoss(nn.Module):
         # Treated as constants (detach) so we don't backprop through the history
         std_e = torch.sqrt(self.running_var_e + 1e-5)
         std_d = torch.sqrt(self.running_var_d + 1e-5)
-        
+
         error_norm = (error_metric - self.running_mean_e) / std_e
         dens_norm = (inv_densities - self.running_mean_d) / std_d
 
         # 4. Distance Matrices on STABLE Data
         X = dens_norm.T.unsqueeze(-1)
         Y = error_norm.T.unsqueeze(-1)
-        
+
         a = torch.cdist(X, X, p=2)
         b = torch.cdist(Y, Y, p=2)
-        
+
         # 5. Double Centering
         a_mean_row = a.mean(dim=2, keepdim=True)
         a_mean_col = a.mean(dim=1, keepdim=True)
         a_mean_grand = a.mean(dim=(1, 2), keepdim=True)
         A_centered = a - a_mean_row - a_mean_col + a_mean_grand
-        
+
         b_mean_row = b.mean(dim=2, keepdim=True)
         b_mean_col = b.mean(dim=1, keepdim=True)
         b_mean_grand = b.mean(dim=(1, 2), keepdim=True)
         B_centered = b - b_mean_row - b_mean_col + b_mean_grand
-        
+
         # 6. Compute dCor² components (Eq. SI2)
-        # dcov2 can be negative — do NOT pre-clamp here; clamping before the
-        # division would create a dead-gradient zone when the model already
-        # achieves error anti-correlation with density (the desired state).
         dcov2 = (A_centered * B_centered).mean(dim=(1, 2))
         dvar_x2 = torch.clamp((A_centered * A_centered).mean(dim=(1, 2)), min=1e-12)
         dvar_y2 = torch.clamp((B_centered * B_centered).mean(dim=(1, 2)), min=1e-12)
@@ -500,7 +497,7 @@ class SmoothDILALoss(nn.Module):
         final_loss = mean_task_loss + self.running_task_loss * current_lambda * dcor_loss
 
         return final_loss, dcor_loss
-        
+
 
 def calc_ser_nd(labels: torch.Tensor, preds: torch.Tensor, relevances: torch.Tensor, t: float) -> torch.Tensor:
     """
@@ -519,14 +516,14 @@ def calc_ser_nd(labels: torch.Tensor, preds: torch.Tensor, relevances: torch.Ten
     labels = torch.as_tensor(labels).float()
     preds = torch.as_tensor(preds).float()
     relevances = torch.as_tensor(relevances).float()
-    
+
     # Ensure (N, C)
     if labels.ndim == 1: labels = labels.view(-1, 1)
     if preds.ndim == 1: preds = preds.view(-1, 1)
     if relevances.ndim == 1: relevances = relevances.view(-1, 1)
 
     num_channels = labels.shape[1]
-    
+
     # Initialize output vector
     ser_values = torch.zeros(num_channels, dtype=labels.dtype, device=labels.device)
 
@@ -560,17 +557,17 @@ def calc_sera(labels: torch.Tensor, preds: torch.Tensor, relevances: torch.Tenso
     labels = torch.as_tensor(labels).float()
     preds = torch.as_tensor(preds).float()
     relevances = torch.as_tensor(relevances).float()
-    
+
     if labels.ndim == 1:
         labels = labels.unsqueeze(1)
         preds = preds.unsqueeze(1)
         relevances = relevances.unsqueeze(1)
 
     num_channels = labels.shape[1]
-    
+
     # Create thresholds
     t_s = torch.linspace(t, 1, sampling, device=labels.device)
-    
+
     # Create matrix to store SER values: Shape (Sampling_Steps, Num_Channels)
     ser_matrix = torch.zeros((sampling, num_channels), dtype=labels.dtype, device=labels.device)
 
@@ -578,16 +575,16 @@ def calc_sera(labels: torch.Tensor, preds: torch.Tensor, relevances: torch.Tenso
     for j, t_val in enumerate(t_s):
         # Vectorized call for all channels at this threshold
         ser_matrix[j] = calc_ser_nd(labels, preds, relevances, t_val)
-        
+
     # Integrate using Trapezoidal rule along the sampling dimension (dim=0)
     sera_values = torch.trapezoid(ser_matrix, x=t_s, dim=0)
-        
+
     return sera_values
 
 def naiive_calc_alpha(labels: torch.Tensor, preds: torch.Tensor, densities: torch.Tensor) -> torch.Tensor:
     """
     Calculates the alpha metric (1 - |PCC(1/density, MAE)|) for all channels simultaneously.
-    
+
     This implementation vectorizes the Pearson Correlation calculation to avoid loops.
 
     Args:
@@ -602,7 +599,7 @@ def naiive_calc_alpha(labels: torch.Tensor, preds: torch.Tensor, densities: torc
     labels = torch.as_tensor(labels).float()
     preds = torch.as_tensor(preds).float()
     densities = torch.as_tensor(densities).float()
-    
+
     if labels.ndim == 1:
         labels = labels.unsqueeze(1)
         preds = preds.unsqueeze(1)
@@ -610,21 +607,21 @@ def naiive_calc_alpha(labels: torch.Tensor, preds: torch.Tensor, densities: torc
 
     # N = Number of samples, C = Number of channels
     N, C = labels.shape
-    # Edge Case: If N <= 1, correlation is undefined. 
+    # Edge Case: If N <= 1, correlation is undefined.
     # Return 0.0 (default neutral value) for all channels.
     if N <= 1:
         return torch.zeros(C, dtype=labels.dtype, device=labels.device)
-    
+
     maes = torch.abs(labels - preds)
-    
+
     # 2. Prepare Variables (Shape: N, C)
     maes = torch.abs(labels - preds)
     inv_densities = 1 / torch.clamp(densities, min=1e-8)
-    
+
     # 3. Vectorized Pearson Correlation Calculation
     # Formula: Cov(X, Y) / (Std(X) * Std(Y))
     # Equivalent to: Sum((X - meanX)*(Y - meanY)) / Sqrt(Sum((X-meanX)^2) * Sum((Y-meanY)^2))
-    
+
     # A. Calculate Means along the sample dimension (dim=0)
     # Shape: (1, C)
     mae_mean = maes.mean(dim=0, keepdim=True)
@@ -648,7 +645,7 @@ def naiive_calc_alpha(labels: torch.Tensor, preds: torch.Tensor, densities: torc
     # 4. Compute Correlation
     # Add epsilon to denominator to prevent division by zero (if constant values exist)
     correlations = numerator / (denominator + 1e-8)
-    
+
     # Explicitly zero out correlations where denominator was effectively 0 (constant input)
     # This handles cases where a channel has identical values for all samples
     mask_undefined = denominator < 1e-8
@@ -657,7 +654,7 @@ def naiive_calc_alpha(labels: torch.Tensor, preds: torch.Tensor, densities: torc
     # 5. Calculate Alpha
     # alpha = 1 - |PCC|
     alpha_values = 1 - torch.abs(correlations)
-    
+
     return alpha_values
 
 def calc_alpha(labels: torch.Tensor, preds: torch.Tensor, densities: torch.Tensor) -> torch.Tensor:
@@ -668,7 +665,7 @@ def calc_alpha(labels: torch.Tensor, preds: torch.Tensor, densities: torch.Tenso
     labels = torch.as_tensor(labels).float()
     preds = torch.as_tensor(preds).float()
     densities = torch.as_tensor(densities).float()
-    
+
     if labels.ndim == 1:
         labels = labels.unsqueeze(1)
         preds = preds.unsqueeze(1)
@@ -680,7 +677,7 @@ def calc_alpha(labels: torch.Tensor, preds: torch.Tensor, densities: torch.Tenso
 
     # Log-L1 Error
     error_metric = torch.log1p(torch.abs(labels - preds))
-    
+
     inv_densities = 1.0 / torch.clamp(densities, min=1e-6)
 
     # --- Z-SCORE NORMALIZATION (Critical for stability) ---
@@ -692,49 +689,30 @@ def calc_alpha(labels: torch.Tensor, preds: torch.Tensor, densities: torch.Tenso
     # Vectorized dCor Calculation
     X = inv_densities.T.unsqueeze(-1)  # (C, N, 1)
     Y = error_metric.T.unsqueeze(-1)   # (C, N, 1)
-    
+
     a = torch.cdist(X, X, p=2)
     b = torch.cdist(Y, Y, p=2)
-    
+
     a_mean_row = a.mean(dim=2, keepdim=True)
     a_mean_col = a.mean(dim=1, keepdim=True)
     a_mean_grand = a.mean(dim=(1, 2), keepdim=True)
     A_centered = a - a_mean_row - a_mean_col + a_mean_grand
-    
+
     b_mean_row = b.mean(dim=2, keepdim=True)
     b_mean_col = b.mean(dim=1, keepdim=True)
     b_mean_grand = b.mean(dim=(1, 2), keepdim=True)
     B_centered = b - b_mean_row - b_mean_col + b_mean_grand
-    
+
     # Statistics
     dcov2 = (A_centered * B_centered).mean(dim=(1, 2))
     dvar_x2 = (A_centered * A_centered).mean(dim=(1, 2))
     dvar_y2 = (B_centered * B_centered).mean(dim=(1, 2))
-    
+
     # Safe Sqrt
     dcov2 = torch.clamp(dcov2, min=0.0)
     dvar_x2 = torch.clamp(dvar_x2, min=1e-12)
     dvar_y2 = torch.clamp(dvar_y2, min=1e-12)
-    
+
     dcor = torch.sqrt(dcov2 + 1e-12) / (torch.sqrt(torch.sqrt(dvar_x2 * dvar_y2)) + 1e-8)
-    
+
     return 1.0 - dcor
-
-
-# def calc_ser(labels, preds, relevances, t):
-#     keep_ind = np.where(relevances >= t)
-#     labels, preds, relevances = labels[keep_ind], preds[keep_ind], relevances[keep_ind]
-#     ser = np.sum(np.square(labels - preds))
-#     return ser
-
-# def calc_sera(labels, preds, relevances, sampling = 50, t = 0.6):
-#     t_s = np.linspace(t, 1, sampling)
-#     sers = np.zeros(sampling)
-#     for i, t in enumerate(t_s):
-#         sers[i] = calc_ser(labels, preds, relevances, t)
-#     sera = np.trapz(sers, t_s)
-#     return sera
-
-# def calc_alpha(labels, preds, densities):
-#     maes = np.abs(labels - preds)
-#     return 1 - np.abs(np.corrcoef(1 / densities, maes)[0][-1])

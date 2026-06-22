@@ -26,7 +26,6 @@ from MatImba.utils import (
 )
 from MatImba.utils.evaluate import get_obj
 from MatImba.utils.losses import calc_alpha, calc_ser_nd, calc_sera
-from MatImba.vis import draw_y_equals_x
 
 # Initialize logger
 logger = logging.getLogger(__name__)

@@ -1,10 +1,3 @@
-from .data import (
-    get_key, A_ele_lib,
-    metallic_radii,
-    ele_ef, mat_cost,
-    magpie_features
-)
-
 from .utils import (
     sk_linear_model,
     compute_mean_relative_error,
@@ -19,12 +12,6 @@ from .stats import (
     
 )
 
-from .compfea import featurise, auto_featurise
-
-from .evaluate import (
-    dil_analysier
-)
-
 from .losses import (
     WeightedL1Loss,
     WeightedMSELoss,
@@ -32,18 +19,10 @@ from .losses import (
     WeightedFocalMSELoss,
     WeightedFocalL1Loss,
     ISR, ESRLoss,
-    NaiiveDILALoss, SmoothDILALoss,
-    StableDILALoss, calc_alpha,
+    SmoothDILALoss,
     calc_ser_nd, calc_sera,
+    calc_alpha,
     naiive_calc_alpha
-)
-
-from .matools import (
-    at_num_sorted,
-    formu_convert,
-    HtoM2wtfrac,
-    wtfrac2HtoM,
-    cweighted_elementalH_formE    
 )
 
 from .struct2graph import (

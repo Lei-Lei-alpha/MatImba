@@ -6,4 +6,3 @@ from .imba import (
     get_weights, calc_dil, calc_relevance,
     calc_comprehensive_imbalance
 )
-from .tabular import TabDataset
