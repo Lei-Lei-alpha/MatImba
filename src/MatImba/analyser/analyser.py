@@ -503,8 +503,8 @@ class imba_analyser():
                 axes[i].set_xlabel(f"True {target_name}")
                 axes[i].set_ylabel(f"Predicted {target_name}")
                 mae = np.mean(np.abs(ml_pred.targets - ml_pred.preds))
-                axes[i].text(0.3, 0.90, "MAE = %.2f" % mae, va="center", ha="center", fontsize=10, transform=axes[i].transAxes)
-                axes[i].text(0.8, 0.15, model_names[i], va="center", ha="center", fontsize=10, transform=axes[i].transAxes)
+                axes[i].text(0.3, 0.90, "MAE = %.2f" % mae, va="center", ha="center", fontsize=8, transform=axes[i].transAxes)
+                axes[i].text(0.8, 0.15, model_names[i], va="center", ha="center", fontsize=8, transform=axes[i].transAxes)
 
         else:
             if axes is None:
@@ -736,12 +736,12 @@ class imba_analyser():
         ax.grid(True, alpha=0.2)
         if orientation == 'horizontal':
             ax.set_yticks([])
-            ax.text(0.125, 0.5, 'Tail', va='center', ha='center', transform=ax.transAxes)
+            ax.text(0.125, 0.5, 'Tail', va='center', ha='center', fontsize=10, transform=ax.transAxes)
         else:
             ax.set_xticks([])
             ax.set_xlabel(r'$\rho$', labelpad=9, fontsize=10)
             ax.xaxis.set_label_position("top")
-            ax.text(0.5, 0.825, 'Head', va='center', ha='center', transform=ax.transAxes, rotation = 90)
+            ax.text(0.5, 0.825, 'Head', va='center', ha='center', fontsize=10, transform=ax.transAxes, rotation = 90)
 
     def plot_split_parity(self, ax, split_data, target_name = "", model_name = None):
         head_gt = split_data['head']['gt']

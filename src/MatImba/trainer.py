@@ -288,17 +288,61 @@ class CgcnnTrainer:
     
 
     def _log_init_info(self):
-        """Logs the initialization summary to console/file."""
-        logger.info(f"--- Trainer Initialized ---")
-        logger.info(f"Python: {sys.version.split()[0]}")
-        logger.info(f"Device: {self.device}")
-        logger.info(f"Model: {self.name}")
-        logger.info(f"DIL Informed: {self.dil_inform}")
-        logger.info(f"Loss Function: {type(self.loss_func).__name__}")
-        logger.info(f"Output Directory: {self.outdir}")
-        logger.info(f"Optimizer: {type(self.optimiser).__name__}")
-        logger.info(f"Scheduler: {self.scheduler_type}")
-        logger.info(f"---------------------------------")
+        """Logs the full training configuration at the start of the log file."""
+        is_bsam = isinstance(self.optimiser, BSAM)
+        pg = self.optimiser.param_groups[0]
+
+        lines = [
+            "=" * 52,
+            f"  Run:     {self.name}",
+            f"  Device:  {self.device}   Python: {sys.version.split()[0]}",
+            f"  Epochs:  {self.epoch_range.stop}",
+            "-" * 52,
+        ]
+
+        # --- Optimiser ---
+        optim_name = type(self.optimiser.base_optimizer).__name__ if is_bsam else type(self.optimiser).__name__
+        lines.append(f"  Optimizer: {'BSAM + ' if is_bsam else ''}{optim_name}")
+        lines.append(f"    lr           = {pg.get('lr', '?'):.4g}")
+        lines.append(f"    weight_decay = {pg.get('weight_decay', '?'):.3g}")
+        if 'betas' in pg:
+            lines.append(f"    betas        = {tuple(pg['betas'])}")
+        if 'eps' in pg:
+            lines.append(f"    eps          = {pg['eps']:.3g}")
+        if is_bsam:
+            lines.append(f"    rho          = {pg.get('rho', '?')}")
+            lines.append(f"    adaptive     = {pg.get('adaptive', False)}")
+
+        # --- Scheduler ---
+        sched = self.scheduler
+        lines.append(f"  Scheduler: {self.scheduler_type}")
+        if isinstance(sched, CosineAnnealingLR):
+            lines.append(f"    T_max   = {sched.T_max}")
+            lines.append(f"    eta_min = {sched.eta_min:.3g}")
+        elif isinstance(sched, ReduceLROnPlateau):
+            lines.append(f"    patience = {sched.patience}")
+            lines.append(f"    factor   = {sched.factor}")
+            lines.append(f"    min_lr   = {sched.min_lrs[0]:.3g}")
+        elif isinstance(sched, OneCycleLR):
+            lines.append(f"    max_lr    = {sched.max_lrs[0]:.4g}")
+            lines.append(f"    pct_start = {getattr(sched, 'pct_start', '?')}")
+
+        # --- Loss / weighting ---
+        lines.append(f"  Loss:      {type(self.loss_func).__name__}")
+        lines.append(f"    weighted_loss = {self.weighted_loss}")
+        lines.append(f"    alpha_metric  = {self.alpha_metric}")
+
+        # --- DILA config ---
+        if self.dil_inform and self.dil_config:
+            lines.append(f"  DILA config:")
+            for k, v in self.dil_config.items():
+                lines.append(f"    {k:<18} = {v}")
+        elif not self.dil_inform:
+            lines.append(f"  DILA: disabled")
+
+        lines.append("=" * 52)
+        for line in lines:
+            logger.info(line)
 
     def train(self, epoch: int, dataloader: Optional[DataLoader] = None) -> Tuple[float, float]:
         if dataloader is None: dataloader = self.train_loader
@@ -506,9 +550,7 @@ class CgcnnTrainer:
         mse = self.meter_val_mse.avg
         l1 = self.meter_val_l1.avg
         esr = self.criterion_esr(all_preds, all_labels).item()
-        # SERA integrated from t=0.5 to 1.0 (lower bound captures tail samples
-        # with relevance > 0.5 while excluding near-zero contributions from the
-        # dense head; matches reported values in Tables SI5 and SI6).
+        # SERA(t_0=0.5) integrated from t=0.5 to 1.0 which captures both prediction error on tail samples and near head samples to stabilise the training.
         sera_scalar = calc_sera(all_labels, all_preds, all_relevances, t=0.5).mean().item()
         # Calculate Awareness (Dependence between Error and Density)
         # alpha_metric decides if we use Pearson Correlation (pcc) or Distance Correlation (dcor)
@@ -627,7 +669,7 @@ class CgcnnTrainer:
                 # Target = 0.8. Quadratic decay.
                 # Values < 0.8 get penalized non-linearly (stronger penalty for lower values).
                 # Values >= 0.8 get 0 penalty.
-                AWARE_THRESHOLD = 0.8
+                AWARE_THRESHOLD = self.dil_config.get('aware_threshold', 0.8)
                 penalty_aware = max(0.0, AWARE_THRESHOLD - self.ema_aware) ** 2
                 
                 # Log Difference = Ratio penalty. 
