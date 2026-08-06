@@ -69,7 +69,7 @@ Source = "https://github.com/Lei-Lei-alpha/MatImba"
 
 # --- Tool Configuration ---
 [tool.hatch.build.targets.wheel]
-packages = ["MatImba/src/MatImba"]
+packages = ["src/MatImba"]
 
 [tool.hatch.build.targets.editable]
 mode = "compat"
@@ -84,5 +84,5 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["MatImba/src"]
+pythonpath = ["src"]
 addopts = "-ra -q"

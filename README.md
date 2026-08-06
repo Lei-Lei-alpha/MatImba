@@ -75,7 +75,7 @@ For the paper's MEGNet graph-network pipeline, use the config-driven entry point
 
 ```bash
 # equivalently: matimba-train --cd expt_configs/final --cf log_kvrh_smooth_dila.yaml
-python MatImba/src/MatImba/run_trainer.py --cd expt_configs/final --cf log_kvrh_smooth_dila.yaml
+python src/MatImba/run_trainer.py --cd expt_configs/final --cf log_kvrh_smooth_dila.yaml
 ```
 
 Config suffixes: `_smooth_dila.yaml` (DILA, proposed) · `_dir.yaml` (Deep Imbalanced Regression) · `_bsam.yaml` (Balanced Sharpness-Aware Minimisation) · `.yaml` (control).
