@@ -106,7 +106,15 @@ def estimate_density(
         if smooth == "kde":
             try:
                 kde = gaussian_kde(labels_c)
-                densities_c = kde.evaluate(labels_c)
+                # scipy materialises an (n_train, n_points) kernel matrix:
+                # ~90 GB for the 130k-sample MatBench targets. Chunk the
+                # evaluation points to cap peak memory at ~0.5 GB (exact,
+                # identical result).
+                chunk = max(1, 2**26 // max(len(labels_c), 1))
+                densities_c = np.concatenate([
+                    kde.evaluate(labels_c[i:i + chunk])
+                    for i in range(0, len(labels_c), chunk)
+                ])
             except np.linalg.LinAlgError:
                 # Fallback for singular matrix (e.g., all values identical)
                 densities_c = np.ones_like(labels_c)
@@ -265,8 +273,14 @@ def adjusted_boxplot_params(data: np.ndarray) -> Tuple[float, float, Tuple[float
     iqr = q3 - q1
     
     # Calculate medcouple (robust skewness measure)
-    y = np.asarray(data, dtype=np.double) 
-    mc = sm.stats.stattools.medcouple(y) 
+    y = np.asarray(data, dtype=np.double)
+    # statsmodels' medcouple builds an O(N^2) matrix (~90 GB at N=106k);
+    # estimate it on a deterministic subsample for large N — the mc estimate
+    # is stable well below this size.
+    _MC_MAX_N = 10_000
+    if y.size > _MC_MAX_N:
+        y = np.random.default_rng(0).choice(y, _MC_MAX_N, replace=False)
+    mc = sm.stats.stattools.medcouple(y)
 
     # Define the outlier range based on skewness
     if mc > 0:
@@ -551,7 +565,7 @@ def calc_comprehensive_imbalance(
     # Handle edge case: Empty or single-value dataset
     if total_mass == 0 or n_bins <= 1:
         return {
-            "DIL_Robust": 0.0,
+            "DIL": 0.0,
             "Gini": 0.0,
             "KL_Div": 0.0,
             "Wasserstein": 0.0

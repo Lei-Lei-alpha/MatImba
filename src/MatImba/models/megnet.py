@@ -138,7 +138,7 @@ class MEGNet(nn.Module):
                 batch, bond_batch):
         '''compute features before last linear layer'''
         if self.embedded:
-            x = self.emb(x).squeeze()
+            x = self.emb(x).squeeze(1)
         else:
             x = x.float()
 
@@ -203,7 +203,7 @@ class MEGNet(nn.Module):
             features = self.FDS(features, targets, epoch)
         
         out = self.linear(features)
-        return out.squeeze()
+        return out.squeeze(-1)
 
     def update_fds(self, train_loader, epoch: int):
         """

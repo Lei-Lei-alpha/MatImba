@@ -217,5 +217,15 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Avoid model files
-experiments
+# Large data / experiment artifacts (checkpoints, predictions, raw datasets) —
+# not tracked in this repo; see README for where to obtain them.
+experiments/
+matbench_data/
+figs/platform/
+*.slurm
+slurm-*.out
+logs/
+
+# Editor/session backups
+*_backup_*/
+*_backup_*.ipynb

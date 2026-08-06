@@ -32,7 +32,7 @@ train:
     warmup_epochs: 10
 
 hpo:
-  trials: 30  # Number of Optuna trials (0 to skip)
+  trials: 10  # Number of Optuna trials (0 to skip)
 
 multi_runs: 5  # Number of multi-seed runs after HPO
 

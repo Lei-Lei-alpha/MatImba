@@ -6,95 +6,152 @@
 
 Official implementation of **"Unbiasing Materials Discovery: A Distribution Imbalance-Aware Framework for Robust Regression"**.
 
-MatImba (Materials Imbalance) is a statistically rigorous framework designed to address the pervasive challenge of target imbalance in materials science datasets. By decoupling predictive error from empirical label density, MatImba enables robust regression even in the sparse, long-tailed extremities where high-value materials (e.g., ultra-hard alloys, high-temperature superconductors) typically reside.
+Materials property datasets are almost always imbalanced: predictive capacity concentrates on the dense bulk of the target distribution, and errors spike exactly where high-value materials live — in the sparse tails. MatImba is a package to work with that reality end-to-end:
 
----
-
-## 🚀 Key Innovations
-
-- **Distribution Imbalance Level ($h$):** A scale-invariant metric (normalised Pietra ratio) to rigorously quantify dataset skewness.
-- **Geometric Topology ($W_1$):** Integration of Wasserstein distance to decouple statistical sparsity from geometric transport cost across property manifolds.
-- **DILA Regularisation:** The **Distribution Imbalance Level Aware (DILA)** loss, which explicitly penalises the statistical dependence (Distance Correlation) between predictive residuals and local data density.
-- **Accuracy-First Robust Selection:** A dynamic checkpoint selection criterion that prioritises global accuracy while enforcing distribution awareness and tail-error stability.
-- **Global Parity:** Systematically suppresses extreme error spikes in sparse regions (improving SERA) without degrading the Mean Absolute Error (MAE) of the well-represented bulk.
+1. **Describe** — quantify a dataset's distribution imbalance before training (`h`, Gini, `D_KL`, `W₁`; density ρ and tail relevance φ).
+2. **Train** — a model-agnostic robust trainer with tail-error-resistant checkpoint selection and the low-cost **DILA** regulariser (Distance Correlation penalty between residuals and label density).
+3. **Analyse** — from out-of-distribution error decomposition to real screening performance, including the **SERA–α coupling diagnosis** that tells you whether tail error is trainable away at all or fixed by the dataset geometry.
 
 ---
 
 ## 🛠️ Installation
 
-### Prerequisites
-- Python 3.10 or higher
-- CUDA-enabled GPU (recommended for training)
-
-### Setup
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/Lei-Lei-alpha/MatImba.git
-   cd matimba
-   ```
-
-2. Install the package and all dependencies in editable mode:
-   ```bash
-   pip install -e .
-   ```
-
----
-
-## 📖 Usage
-
-### 1. Quantifying Dataset Imbalance
-Use our diagnostic tools to evaluate your dataset's topology:
-```python
-from MatImba.utils.losses import calc_h, calc_w1
-
-# target_values: array-like of regression targets
-h_val = calc_h(target_values)
-w1_val = calc_w1(target_values)
-print(f"Imbalance Level (h): {h_val:.3f}, Wasserstein (W1): {w1_val:.3f}")
-```
-
-### 2. Training with DILA
-The main entry point for training is `run_trainer.py`. We provide configuration files for MatBench datasets in `expt_configs/final/`.
+Requires Python 3.10–3.12 (pinned by `torch_geometric`); a CUDA GPU is recommended for GNN training.
 
 ```bash
-# Train MEGNet on log_kvrh using DILA regularisation
-python src/MatImba/run_trainer.py --config expt_configs/final/log_kvrh_smooth_dila.yaml
+git clone https://github.com/Lei-Lei-alpha/MatImba.git
+cd MatImba
+pip install -e .
 ```
 
-DILA is an loss objective function, you can easily use it in your own training scripts.
+---
 
-### 3. Comparison with Baselines
-MatImba supports multiple imbalanced regression strategies:
-- **Control:** Standard Empirical Risk Minimisation (MSE/L1).
-- **DIR:** Deep Imbalanced Regression (Label/Feature Distribution Smoothing).
-- **BSAM:** Balanced Sharpness-Aware Minimisation.
+## 📖 The three-stage workflow
 
-Example config suffix mappings:
-- `_smooth_dila.yaml`: DILA (Proposed)
-- `_dir.yaml`: Deep Imbalanced Regression
-- `_bsam.yaml`: Balanced Sharpness-Aware Minimisation
-- `.yaml`: Standard Control
+### 1. Describe: quantify dataset imbalance
 
-### 4. Evaluation Metrics
-We provide advanced metrics for tail-end robustness:
-- **SERA:** Squared Error with respect to Relevance Area.
-- **vHTS Simulation:** Virtual High-Throughput Screening (Precision/Recall for extreme values).
+```python
+import pandas as pd
+from MatImba.analysis import DatasetProfile, compare_profiles
+
+y = pd.read_csv("matbench_data/log_gvrh.csv").iloc[:, 0].values
+profile = DatasetProfile(y, name="log_gvrh")
+print(profile.metrics())
+# {'name': 'log_gvrh', 'n': 10987, 'h': 0.498, 'Gini': ..., 'D_KL': ..., 'W1': ..., 'tail_fraction': ...}
+profile.plot()  # distribution + relevance phi overlay
+
+# Compare several datasets in imbalance-metric space (PCA biplot)
+result = compare_profiles([profile, other_profile, ...])
+print(result["table"])
+```
+
+### 2. Train: robust training with any PyTorch model
+
+The generic training loop — DILA loss, EMA-smoothed robust model selection, five checkpoint flavors, per-epoch metric logging — lives in `BaseRobustTrainer`. To use it with your own model, implement two hooks:
+
+```python
+from MatImba.base_trainer import BaseRobustTrainer, BatchFields
+from MatImba.dataset.imba import estimate_density, get_weights, calc_relevance
+
+class MyTrainer(BaseRobustTrainer):
+    def forward_batch(self, batch):
+        x, *_ = batch
+        return self.model(x)
+
+    def unpack_batch(self, batch):
+        x, y, omega, rou, phi = batch
+        return BatchFields(y=y, weights=omega, density=rou, relevance=phi)
+
+trainer = MyTrainer(model=model, train_loader=train_loader, val_loader=val_loader,
+                    dil_inform=True, dil_config={"lambda": 1.0, "base_metric": "huber"})
+trainer.fit()
+```
+
+`density` (ρ) and `relevance` (φ) come from `estimate_density` / `calc_relevance` on your training labels — see the complete runnable example in [`examples/custom_trainer_example.py`](examples/custom_trainer_example.py) (plain MLP, CPU, under a minute).
+
+DILA adds essentially no runtime or memory over the control objective (unlike sharpness-aware training), which makes it the default mitigation to try when Stage 3 shows your dataset's tail error is awareness-coupled.
+
+For the paper's MEGNet graph-network pipeline, use the config-driven entry point (`CgcnnTrainer` subclasses the same base):
+
+```bash
+# equivalently: matimba-train --cd expt_configs/final --cf log_kvrh_smooth_dila.yaml
+python MatImba/src/MatImba/run_trainer.py --cd expt_configs/final --cf log_kvrh_smooth_dila.yaml
+```
+
+Config suffixes: `_smooth_dila.yaml` (DILA, proposed) · `_dir.yaml` (Deep Imbalanced Regression) · `_bsam.yaml` (Balanced Sharpness-Aware Minimisation) · `.yaml` (control).
+
+### 3. Analyse: OOD error → screening performance → SERA–α diagnosis
+
+Everything in `MatImba.analysis` is model-agnostic: it consumes the `*_test_predictions.csv` and `*_val_log.csv` files the trainer writes (or plain arrays).
+
+```bash
+# Full standard report: metric tables (ddof=1, significant-figure formatting),
+# alpha-SERA coupling, screening metrics, summary figures
+matimba-analyse --experiments experiments/final --out figs/final
+```
+
+Or from Python:
+
+```python
+from MatImba.analysis import (collect_experiments, load_trajectories,
+                              coupling_table, summary_plot, discovery_metrics)
+
+index, preds = collect_experiments("experiments/final")
+
+# OOD error decomposition (works identically on CV and MatFold splits)
+summary_plot(preds["log_gvrh"], target_name="log_gvrh")
+
+# Screening: precision/recall/enrichment at an experimental budget
+print(discovery_metrics(preds["log_gvrh"]["smooth_dila"], budget_ratio=1.0))
+
+# The core diagnosis: is tail error coupled to awareness alpha?
+coupling = coupling_table(load_trajectories(index))
+print(coupling[["dataset", "method", "regime", "spearman"]])
+```
+
+The coupling `regime` is the actionable output:
+
+| regime | meaning | implication |
+|---|---|---|
+| `linear` | SERA falls monotonically with α | awareness-based training (e.g. DILA) buys tail accuracy |
+| `thresholded` | coupling only below a breakpoint | gains saturate once α is high |
+| `decoupled` | no significant dependence | the tail-error floor is set by dataset geometry (`W₁`); collect data, don't tune losses |
+
+Threshold conventions are package-wide constants in `MatImba.analysis`: `SERA_T0 = 0.5` (SERA integration lower bound), `TAIL_PHI = 0.8` (head/tail partition), `SCREEN_PHI = 0.75` (screening candidates).
+
+### Reproducing the paper
+
+```bash
+python scripts/make_paper_figs.py --out figs/paper
+```
+
+regenerates every figure and table (Fig 1–4, the quantitative α–SERA analysis, and the SI metric/coupling tables) from the archived predictions in `experiments/`.
 
 ---
+
+## 📏 Metrics
+
+- **SERA** — squared error–relevance area: tail error integrated over relevance thresholds.
+- **α (awareness)** — `1 − dCor(log-L1 error, 1/density)`: 1 means errors are independent of label density; 0 means errors track sparsity.
+- **h, Gini, D_KL, W₁** — bounded dataset imbalance descriptors (statistical magnitude and transport cost).
+- **vHTS metrics** — extrapolative precision, tail recall and enrichment factor under a screening budget.
 
 ## 📊 Datasets
 
-MatImba is benchmarked across the **MatBench v0.1** suite and **MatFold** structural extrapolation splits:
-- `log_kvrh`: Bulk Modulus (Log)
-- `log_gvrh`: Shear Modulus (Log)
-- `perovskites`: Formation Energy
-- `phonons`: Vibrational DOS Peak
+Benchmarked across the **MatBench v0.1** suite with both standard 5-fold CV and **MatFold** structure-disjoint (OOD) splits: `log_kvrh`, `log_gvrh`, `perovskites`, `phonons` (modelled); 10 targets profiled in Stage 1.
+
+## 🧪 Tests
+
+```bash
+pip install -e ".[dev]"
+pytest tests/
+```
+
+`tests/test_base_trainer.py` trains a small MLP through the full robust loop on CPU — the proof that the trainer works beyond graph networks.
 
 ---
 
 ## 📝 Citation
-
-If you use this framework or the DILA loss in your research, please cite our paper:
 
 ```bibtex
 @article{lei2026unbiasing,
@@ -105,12 +162,10 @@ If you use this framework or the DILA loss in your research, please cite our pap
 }
 ```
 
----
-
 ## 🤝 Acknowledgements
+
 This work was supported by EPSRC (EP/V042556/1) and the Leverhulme Trust. Computing resources were provided by the University of Nottingham's Ada HPC and the Sulis supercomputer.
 
----
-
 ## 📜 License
-Distributed under the CC0 1.0 universal License. See `LICENSE` for more information.
+
+Distributed under the CC0 1.0 Universal license. See `LICENSE` for details.

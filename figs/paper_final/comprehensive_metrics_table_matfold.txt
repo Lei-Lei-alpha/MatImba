@@ -1,0 +1,33 @@
+\begin{tabular}{lcccc}
+\toprule
+Dataset & bsam & control & dir & smooth\_dila \\
+\midrule
+log\_gvrh & \textbf{0.120 $\pm$ 0.006} & 0.122 $\pm$ 0.007 & 0.122 $\pm$ 0.007 & 0.126 $\pm$ 0.007 \\
+log\_kvrh & 0.092 $\pm$ 0.005 & 0.093 $\pm$ 0.005 & 0.093 $\pm$ 0.005 & \textbf{0.086 $\pm$ 0.004} \\
+perovskites & 0.10 $\pm$ 0.02 & \textbf{0.090 $\pm$ 0.016} & 0.10 $\pm$ 0.02 & 0.099 $\pm$ 0.015 \\
+phonons & 45 $\pm$ 8 & 43 $\pm$ 4 & \textbf{42 $\pm$ 4} & 48 $\pm$ 4 \\
+\bottomrule
+\end{tabular}
+
+\begin{tabular}{lcccc}
+\toprule
+Dataset & bsam & control & dir & smooth\_dila \\
+\midrule
+log\_gvrh & 6 $\pm$ 3 & 6 $\pm$ 3 & \textbf{5 $\pm$ 3} & 6 $\pm$ 4 \\
+log\_kvrh & \textbf{8 $\pm$ 4} & 9 $\pm$ 5 & 8 $\pm$ 4 & 8 $\pm$ 4 \\
+perovskites & 8 $\pm$ 8 & 8 $\pm$ 8 & \textbf{7 $\pm$ 8} & 10 $\pm$ 10 \\
+phonons & 700000 $\pm$ 400000 & 520000 $\pm$ 180000 & \textbf{500000 $\pm$ 200000} & 700000 $\pm$ 300000 \\
+\bottomrule
+\end{tabular}
+
+\begin{tabular}{lcccc}
+\toprule
+Dataset & bsam & control & dir & smooth\_dila \\
+\midrule
+log\_gvrh & 0.82 $\pm$ 0.03 & 0.82 $\pm$ 0.03 & 0.82 $\pm$ 0.02 & \textbf{0.83 $\pm$ 0.03} \\
+log\_kvrh & 0.67 $\pm$ 0.03 & 0.66 $\pm$ 0.02 & \textbf{0.67 $\pm$ 0.03} & 0.66 $\pm$ 0.03 \\
+perovskites & 0.80 $\pm$ 0.10 & 0.79 $\pm$ 0.11 & \textbf{0.80 $\pm$ 0.10} & 0.80 $\pm$ 0.11 \\
+phonons & \textbf{0.63 $\pm$ 0.07} & 0.61 $\pm$ 0.06 & 0.62 $\pm$ 0.07 & 0.59 $\pm$ 0.07 \\
+\bottomrule
+\end{tabular}
+

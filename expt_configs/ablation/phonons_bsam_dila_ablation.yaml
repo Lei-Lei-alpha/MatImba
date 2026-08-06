@@ -1,0 +1,52 @@
+save:
+  basedir: 'experiments/ablation/phonons'
+  outdir: 'bsam_dila'
+
+data:
+  data_loc: 'matbench_data/matbench_phonons'
+  folds: [0]
+  target_name: 'last phdos peak'
+  test_size: 0.1
+  batch_size: 256
+  reweight: 'sqrt_inv'
+  shuffle: true
+  seed: 39
+  cutoff: 5
+  add_z_bond_coord: false
+  atom_features: 'embed'
+  edge_embed_size: 10
+
+model:
+  state_input_shape: 2
+  device: cuda:0
+
+train:
+  epoch_range: 500
+  weighted_loss: true      # BSAM uses cost-sensitive reweighting
+  alpha_metric: 'dcor'
+  dil_inform: true         # DILA loss term enabled
+  dil_config:
+    method: 'smooth'
+    lambda: 1.05
+    warmup_epochs: 10
+    momentum: 0.1
+
+# BSAM: Balanced Sharpness-Aware Minimisation
+bsam:
+  rho: 0.05       # Initial neighbourhood size (tuned by HPO)
+  adaptive: false # Set to true for ASAM (Adaptive SAM)
+
+hpo:
+  trials: 30  # Number of Optuna trials (0 to skip)
+  tune_dila: true
+
+multi_runs: 5  # Number of multi-seed runs after HPO
+
+optimiser:
+  name: 'AdamW'
+
+scheduler:
+  name: 'CosineAnnealingLR'
+
+loss:
+  loss: 'WeightedHuberLoss'

@@ -7,7 +7,7 @@ data:
   folds: [0]
   target_name: 'last phdos peak'
   test_size: 0.1
-  batch_size: 256
+  batch_size: 64
   reweight: 'sqrt_inv'
   shuffle: true
   seed: 39
@@ -27,6 +27,7 @@ fds:
 
 model:
   state_input_shape: 2
+  device: cuda:0
 
 train:
   epoch_range: 500
@@ -36,9 +37,9 @@ train:
   profile_runtime: true
 
 hpo:
-  trials: 16  # Number of Optuna trials (0 to skip)
+  trials: 10  # Number of Optuna trials (0 to skip)
 
-multi_runs: 5  # Number of multi-seed runs after HPO
+multi_runs: 3  # Number of multi-seed runs after HPO
   
 optimiser:
   name: 'AdamW'

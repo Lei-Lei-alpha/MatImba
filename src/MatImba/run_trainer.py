@@ -85,8 +85,9 @@ class RobustObjective:
     Stage 1: Screening.
     Runs 3 seeds per trial. Implements 'Fail Fast' to discard obviously unstable params.
     """
-    def __init__(self, expt_config, fold, model_name, datafiles, 
-                 bond_converter, atom_converter, target_name, first_best_params=None):
+    def __init__(self, expt_config, fold, model_name, datafiles,
+                 bond_converter, atom_converter, target_name, first_best_params=None,
+                 fixed_dil_config_overrides=None):
         self.expt_config = expt_config
         self.fold = fold
         self.model_name = model_name
@@ -95,6 +96,7 @@ class RobustObjective:
         self.atom_converter = atom_converter
         self.target_name = target_name
         self.first_best_params = first_best_params
+        self.fixed_dil_config_overrides = fixed_dil_config_overrides
         
         self.seeds_per_trial = 3     
         self.stability_penalty = 2.0 
@@ -108,19 +110,26 @@ class RobustObjective:
             bsam_rho = trial.suggest_float('rho', 0.01, 0.25, log=True)
 
         # 2. Check for DILA Config — tune base_metric, lambda, momentum
-        # Only active when hpo.tune_dila: true is set in the config (default false).
+        # tune_dila=True : suggest DILA params via Optuna.
+        # tune_dila=False: lock in fixed_dil_config_overrides from the seeding JSON (if present),
+        #                  so every trial uses the same ablation-tuned DILA params, and those
+        #                  params are stored in trial user_attrs for verify_top_candidates to
+        #                  propagate into the output JSON.
         dil_config_overrides = None
         _tune_dila = self.expt_config.get('hpo', {}).get('tune_dila', False)
         if self.expt_config['train'].get('dil_inform', False) and _tune_dila:
             dil_cfg = self.expt_config['train'].get('dil_config', {})
             if self.first_best_params and 'dila_base_metric' in self.first_best_params:
                 p = self.first_best_params
-                dil_base_metric = trial.suggest_categorical('dila_base_metric', [p['dila_base_metric']])
-                dil_lambda = trial.suggest_float('dila_lambda', *narrow_range(0.5, 3.0, p['dila_lambda']))
+                # Categorical distributions must use the same choices across all trials in a
+                # study — collapsing to a single element breaks continuation. TPE steers toward
+                # the best category naturally without pinning it.
+                dil_base_metric = trial.suggest_categorical('dila_base_metric', ['l1', 'mse', 'huber'])
+                dil_lambda = trial.suggest_float('dila_lambda', *narrow_range(0.1, 1.5, p['dila_lambda']))
                 dil_momentum = trial.suggest_float('dila_momentum', *narrow_range(0.01, 0.5, p['dila_momentum']), log=True)
             else:
                 dil_base_metric = trial.suggest_categorical('dila_base_metric', ['l1', 'mse', 'huber'])
-                dil_lambda = trial.suggest_float('dila_lambda', 0.5, 3.0)
+                dil_lambda = trial.suggest_float('dila_lambda', 0.1, 1.5)
                 dil_momentum = trial.suggest_float('dila_momentum', 0.01, 0.5, log=True)
             dil_config_overrides = {
                 'method': dil_cfg.get('method', 'smooth'),
@@ -128,16 +137,31 @@ class RobustObjective:
                 'lambda': dil_lambda,
                 'momentum': dil_momentum,
                 'warmup_epochs': dil_cfg.get('warmup_epochs', 20),
+                'aware_threshold': dil_cfg.get('aware_threshold', 0.8),
             }
             trial.set_user_attr("dil_config_overrides", dil_config_overrides)
+        elif self.expt_config['train'].get('dil_inform', False) and self.fixed_dil_config_overrides:
+            dil_cfg = self.expt_config['train'].get('dil_config', {})
+            dil_config_overrides = self.fixed_dil_config_overrides.copy()
+            if 'aware_threshold' not in dil_config_overrides:
+                dil_config_overrides['aware_threshold'] = dil_cfg.get('aware_threshold', 0.8)
+            trial.set_user_attr("dil_config_overrides", dil_config_overrides)
+        elif self.expt_config['train'].get('dil_inform', False):
+            # tune_dila=False and no fixed overrides from JSON — persist YAML dil_config so the
+            # JSON always records an explicit DILA config rather than null. This prevents silent
+            # YAML fallback in multi-run when old Optuna trials (without this attr) win
+            # verification.
+            dil_cfg = self.expt_config['train'].get('dil_config', {})
+            trial.set_user_attr("dil_config_overrides", dil_cfg.copy())
 
         # 3. Suggest optimiser / scheduler parameters
         config_scheduler = self.expt_config['scheduler'].get('name')
 
         
-        if self.first_best_params:
-            scheduler_type = trial.suggest_categorical('scheduler_type', [self.first_best_params['scheduler_type']])
-        elif config_scheduler is not None:
+        # Categorical distributions must stay consistent across all trials in a study;
+        # narrowing to a single element on continuation crashes Optuna. Use the same
+        # choices the original trials registered; TPE steers toward the best value.
+        if config_scheduler is not None:
             scheduler_type = trial.suggest_categorical('scheduler_type', [config_scheduler])
         else:
             scheduler_type = trial.suggest_categorical('scheduler_type', ['ReduceLROnPlateau', 'CosineAnnealingLR', 'OneCycleLR'])
@@ -275,7 +299,11 @@ class RobustObjective:
 
         train_config = self.expt_config['train'].copy()
         if bsam_rho is not None: train_config['weighted_loss'] = True
-        if dil_config_overrides is not None: train_config['dil_config'] = dil_config_overrides
+        if dil_config_overrides is not None:
+            # Merge overrides into base dil_config so keys like aware_threshold are preserved
+            base_dil = train_config.get('dil_config', {}).copy()
+            base_dil.update(dil_config_overrides)
+            train_config['dil_config'] = base_dil
 
         trainer = CgcnnTrainer(
             model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader,
@@ -318,22 +346,37 @@ def _load_fold0_params(outdir):
         return None
 
 # --- NEW: Candidate Verification Logic ---
-def verify_top_candidates(study, objective_fn, top_k=3, n_seeds=5):
+def verify_top_candidates(study, objective_fn, top_k=3, n_seeds=5, mandatory_trial_number=None,
+                          dil_overrides_fallback=None):
     """
     Takes the top K candidates from the study and runs them on N *new* seeds.
     Returns the params of the most robust candidate.
+    If mandatory_trial_number is given (e.g. the seeded existing-JSON trial), that trial
+    is always included in verification even if it falls outside the top-k by Optuna score,
+    guaranteeing the original params are preserved when nothing new beats them.
+    dil_overrides_fallback: dil_config_overrides to assign to any trial whose user_attrs lack
+    the key (old DB trials pre-dating the DILA override feature). Prevents null propagating
+    into the output JSON when a legacy trial wins the top-k ranking.
     """
     logger.info(f"--- Stage 2: Verifying Top {top_k} Candidates on {n_seeds} New Seeds ---")
-    
+
     # 1. Get Top Candidates
     df = study.trials_dataframe()
     complete_df = df[df.state == 'COMPLETE'].sort_values('value')
-    
+
     if complete_df.empty:
         logger.warning("No complete trials to verify.")
         return None
-        
+
     top_trials = complete_df.head(top_k)
+
+    # Always include the mandatory trial (seeded existing-JSON params) if not already present.
+    if mandatory_trial_number is not None:
+        if mandatory_trial_number not in top_trials['number'].values:
+            mandatory_row = complete_df[complete_df['number'] == mandatory_trial_number]
+            if not mandatory_row.empty:
+                top_trials = pd.concat([top_trials, mandatory_row], ignore_index=True)
+                logger.info(f"Mandatory trial {mandatory_trial_number} (existing JSON params) added to verification candidates.")
     candidates = []
     
     # 2. Extract Params for Candidates
@@ -341,13 +384,16 @@ def verify_top_candidates(study, objective_fn, top_k=3, n_seeds=5):
         trial_number = row['number']
         trial = study.trials[trial_number]
         
+        trial_dil = trial.user_attrs.get('dil_config_overrides')
+        if trial_dil is None and dil_overrides_fallback is not None:
+            trial_dil = dil_overrides_fallback
         candidates.append({
             'id': trial_number,
             'hpo_params': trial.params,
             'optim_params': trial.user_attrs['optim_params'],
             'sched_params': trial.user_attrs['sched_params'],
             'scheduler_type': trial.user_attrs['scheduler_type'],
-            'dil_config_overrides': trial.user_attrs.get('dil_config_overrides'),
+            'dil_config_overrides': trial_dil,
             'original_score': row['value']
         })
 
@@ -391,9 +437,9 @@ def verify_top_candidates(study, objective_fn, top_k=3, n_seeds=5):
         
         if robust_score < best_robust_score:
             best_robust_score = robust_score
-            # We return the FULL structured config to avoid reconstruction errors
+            # We return the FULL structured config to avoid reconstruction errors.
+            # scheduler_type is not saved at top-level — read from hpo_params['scheduler_type'].
             best_candidate = {
-                'scheduler_type': cand['scheduler_type'],
                 'optim_params': cand['optim_params'],
                 'sched_params': cand['sched_params'],
                 'hpo_params': cand['hpo_params'],
@@ -402,10 +448,8 @@ def verify_top_candidates(study, objective_fn, top_k=3, n_seeds=5):
             
     if best_candidate is None:
         logger.warning("All candidates failed verification! Falling back to best study trial (reconstructing).")
-        # Reconstruct fallback
         trial = study.best_trial
         return {
-            'scheduler_type': trial.user_attrs['scheduler_type'],
             'optim_params': trial.user_attrs['optim_params'],
             'sched_params': trial.user_attrs['sched_params'],
             'hpo_params': trial.params,
@@ -478,37 +522,61 @@ def run(config_path, config_file, force_hpo=False):
             # narrows around the known-good params instead of searching from scratch.
             # Guard: only when no completed trial exists yet (avoids overwriting a
             # partially-finished force-hpo re-run that already has a better trial).
-            if force_hpo and os.path.exists(best_params_file) and not first_best_params:
+            seeded_trial_number = None
+            fixed_dil_overrides = None
+            if force_hpo and os.path.exists(best_params_file):
                 with open(best_params_file, 'r') as f:
                     existing = json.load(f)
-                first_best_params = existing.get('hpo_params', existing)
-                study.enqueue_trial(first_best_params)
-                logger.info(f"--force-hpo: seeding study from {best_params_file}, narrowing search ranges")
+                # Always extract dil_config_overrides from the seeding JSON so every
+                # trial in this force-hpo run uses the same DILA params (when tune_dila=False).
+                fixed_dil_overrides = existing.get('dil_config_overrides')
+                if not first_best_params:
+                    first_best_params = existing.get('hpo_params', existing)
+                    before_numbers = {t.number for t in study.trials}
+                    study.enqueue_trial(first_best_params)
+                    after_numbers = {t.number for t in study.trials}
+                    new_numbers = after_numbers - before_numbers
+                    seeded_trial_number = new_numbers.pop() if new_numbers else None
+                    logger.info(f"--force-hpo: seeding study from {best_params_file} as trial {seeded_trial_number}, narrowing search ranges")
             elif fold != 0 and not first_best_params:
                 fold_0_params = _load_fold0_params(outdir)
                 if fold_0_params: study.enqueue_trial(fold_0_params)
+                # Carry fold_0's dil_config_overrides into subsequent folds
+                fold_0_json = os.path.join(outdir, 'fold_0_best_params.json')
+                if os.path.exists(fold_0_json):
+                    with open(fold_0_json) as f:
+                        fixed_dil_overrides = json.load(f).get('dil_config_overrides')
 
-            # Count only COMPLETE trials to ensure sufficient sampling
+            # Count COMPLETE + PRUNED trials toward the budget — both consumed resources.
+            # RUNNING (zombie from a crash) and WAITING are excluded from the count.
+            # Verification (verify_top_candidates) still uses only COMPLETE trials.
+            attempted_trials = [t for t in study.trials if t.state in (
+                optuna.trial.TrialState.COMPLETE,
+                optuna.trial.TrialState.PRUNED,
+            )]
             completed_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
             target_trials = (hpo_trials if fold == 0 else (1 + 2 * hpo_trials // 3))
-            remaining = target_trials - len(completed_trials)
+            remaining = target_trials - len(attempted_trials)
 
             # Single consolidated log for the entire HPO phase — avoids one file per trial-seed.
             setup_file_logging(os.path.join(outdir, f'fold_{fold}_hpo.log'))
 
             objective_fn = RobustObjective(
                 expt_config, fold, model_name, datafiles,
-                bond_converter, atom_converter, target_name, first_best_params
+                bond_converter, atom_converter, target_name, first_best_params,
+                fixed_dil_config_overrides=fixed_dil_overrides,
             )
 
             if remaining > 0:
                 logger.info(f"Running {remaining} HPO trials for fold {fold} ({objective_fn.seeds_per_trial} seeds/trial)...")
                 study.optimize(objective_fn, n_trials=remaining)
             else:
-                logger.info(f"Fold {fold}: {len(completed_trials)}/{target_trials} trials already complete, skipping optimization.")
+                logger.info(f"Fold {fold}: {len(attempted_trials)} attempted ({len(completed_trials)} complete) >= {target_trials} target, skipping optimization.")
 
             # --- STAGE 2: VERIFICATION ---
-            best_params_for_runs = verify_top_candidates(study, objective_fn, top_k=3, n_seeds=5)
+            best_params_for_runs = verify_top_candidates(study, objective_fn, top_k=3, n_seeds=5,
+                                                          mandatory_trial_number=seeded_trial_number,
+                                                          dil_overrides_fallback=fixed_dil_overrides)
             study.trials_dataframe().to_csv(os.path.join(outdir, f'fold_{fold}_all_trials.csv'), index=False)
             if best_params_for_runs:
                 with open(best_params_file, 'w') as f:
@@ -568,7 +636,7 @@ def run(config_path, config_file, force_hpo=False):
 
                 # Load other params
                 if 'optim_params' in best_params_for_runs:
-                    sched_type = best_params_for_runs.get('scheduler_type', sched_type)
+                    sched_type = best_params_for_runs['hpo_params'].get('scheduler_type', sched_type)
                     optim_params = best_params_for_runs['optim_params']
                     sched_params = best_params_for_runs['sched_params']
                 else:
@@ -642,8 +710,17 @@ def run(config_path, config_file, force_hpo=False):
             if best_params_for_runs and train_config.get('dil_inform', False):
                 dil_overrides = best_params_for_runs.get('dil_config_overrides')
                 if dil_overrides:
-                    train_config['dil_config'] = dil_overrides
+                    # Merge overrides into YAML base so keys absent from JSON (e.g. aware_threshold)
+                    # fall back to the YAML value rather than the trainer default.
+                    base_dil = train_config.get('dil_config', {}).copy()
+                    base_dil.update(dil_overrides)
+                    train_config['dil_config'] = base_dil
                     logger.info(f"Run {run_id}: applying tuned DILA config: {dil_overrides}")
+                else:
+                    logger.warning(
+                        f"Run {run_id}: dil_config_overrides is null in JSON — "
+                        f"falling back to YAML dil_config: {train_config.get('dil_config', {})}"
+                    )
 
             trainer = CgcnnTrainer(
                 model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader,

@@ -4,7 +4,7 @@ save:
   
 data:
   data_loc: 'matbench_data/matbench_log_gvrh'
-  folds: [0,1,2]
+  folds: [0]
   target_name: 'log10(G_VRH)'
   test_size: 0.1
   batch_size: 879
@@ -27,12 +27,15 @@ train:
   dil_inform: true
   dil_config:
     method: 'smooth'
-    lambda: 1.25
+    lambda: 0.5
     momentum: 0.1
     warmup_epochs: 10
+    aware_threshold: 0.86
 
 hpo:
   trials: 30  # Number of Optuna trials (0 to skip)
+  tune_dila: true
+  force_hpo: true
 
 multi_runs: 5  # Number of multi-seed runs after HPO
 
